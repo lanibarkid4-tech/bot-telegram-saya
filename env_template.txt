@@ -1,0 +1,23 @@
+========================================
+   BUAT FILE .env DI FOLDER INI
+========================================
+
+1. Klik kanan di folder ini -> New -> Text Document
+2. Beri nama file: .env  (ada titik di depan, tidak ada .txt)
+3. Isi dengan teks di bawah ini:
+
+----------------------------------------
+TELEGRAM_BOT_TOKEN=paste_token_anda_disini
+----------------------------------------
+
+Ganti "paste_token_anda_disini" dengan token dari BotFather.
+Token BotFather biasanya bentuknya seperti:
+123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+
+LANGKAH MEMBUAT TOKEN:
+1. Buka Telegram
+2. Cari @BotFather
+3. Ketik /newbot
+4. Ikuti instruksinya
+5. Copy token yang diberikan
+6. Paste di file .env

@@ -1,0 +1,13 @@
+{
+  "name": "telegram-bot-pemula",
+  "version": "1.0.0",
+  "description": "Bot Telegram untuk pemula - lengkap dengan penjelasan",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
