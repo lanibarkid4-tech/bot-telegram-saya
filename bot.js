@@ -11,6 +11,9 @@ require('dotenv').config();
 // 2️⃣  IMPORT LIBRARY TELEGRAM - Untuk komunikasi dengan Telegram
 const TelegramBot = require('node-telegram-bot-api');
 
+// 2️⃣b IMPORT MODULE FOREX (signal trading gratis)
+const forex = require('./forex');
+
 // 3️⃣  AMBIL TOKEN DARI FILE .env
 //     Token ini seperti "password" bot Anda. Jangan share ke orang lain!
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -68,6 +71,12 @@ Saya bot yang siap membantu Anda 24 jam.
 /jam   - Lihat jam sekarang
 /quote - Quote motivasi
 
+📊 FOREX SIGNAL (gratis):
+/pairs   - Daftar pair forex
+/signal  - Signal EUR/USD
+/signal GBPJPY - Pair tertentu
+/signals - Semua signal
+
 Silakan coba salah satu perintah di atas! 😊
   `;
 
@@ -95,6 +104,12 @@ Berikut perintah yang bisa Anda gunakan:
 /info   - Lihat info akun Telegram Anda
 /jam    - Lihat waktu sekarang
 /quote  - Dapatkan kata-kata motivasi
+
+📊 FOREX SIGNAL (gratis):
+/pairs   - Lihat daftar pair forex
+/signal  - Signal EUR/USD (default)
+/signal GBPJPY - Signal pair tertentu
+/signals - Ringkasan semua pair
 
 💡 Tips: Cukup kirim pesan biasa (contoh: "halo", "apa kabar"),
 maka bot akan membalas Anda!
@@ -183,6 +198,99 @@ bot.onText(/\/quote/, (pesan) => {
   const quoteTerpilih = daftarQuote[indexAcak];
 
   bot.sendMessage(chatId, `💭 QUOTE HARI INI:\n\n"${quoteTerpilih}"`);
+});
+
+// ======================================================
+//  📊 PERINTAH FOREX - SIGNAL TRADING
+// ======================================================
+
+// /forex atau /signal → signal untuk pair tertentu atau default EURUSD
+bot.onText(/^\/(forex|signal)(\s+(.+))?$/, async (pesan, match) => {
+  const chatId = pesan.chat.id;
+  const input = match[3] ? match[3].trim() : 'EURUSD';
+
+  // Tampilkan "sedang menganalisa..."
+  const loadingMsg = await bot.sendMessage(chatId, `⏳ Sedang menganalisa ${input.toUpperCase()}...`);
+
+  const result = await forex.getSignalForPair(input);
+  if (result.success) {
+    bot.editMessageText(result.message, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown'
+    });
+  } else {
+    bot.editMessageText(result.message, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id
+    });
+  }
+});
+
+// /pairs → daftar semua pair forex yang didukung
+bot.onText(/^\/pairs$/, (pesan) => {
+  const chatId = pesan.chat.id;
+  const daftar = forex.SUPPORTED_PAIRS.map(p => `• \`${p.display}\``).join('\n');
+  const pesanDaftar = `
+📋 *DAFTAR PAIR FOREX*
+
+${daftar}
+
+📌 *Cara pakai:*
+Ketik \`/signal EURUSD\` (atau pair lain)
+Contoh: \`/signal GBPJPY\`
+
+⏰ Data diupdate harian dari Frankfurter API (ECB).
+  `;
+  bot.sendMessage(chatId, pesanDaftar, { parse_mode: 'Markdown' });
+});
+
+// /signals → ringkasan signal semua pair
+bot.onText(/^\/signals$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '⏳ Mengambil signal semua pair...');
+
+  const results = await forex.getAllSignals();
+  if (!results.length) {
+    bot.editMessageText('❌ Gagal mengambil data. Coba lagi nanti.', {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id
+    });
+    return;
+  }
+
+  // Hitung ringkasan BUY / SELL / NETRAL
+  const buy = results.filter(r => r.analysis.signal === 'BUY');
+  const sell = results.filter(r => r.analysis.signal === 'SELL');
+  const netral = results.filter(r => r.analysis.signal === 'NETRAL');
+
+  const lines = [];
+  lines.push('📊 *RINGKASAN SIGNAL FOREX*');
+  lines.push(`🕐 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+  lines.push('');
+  lines.push('*Ringkasan:*');
+  lines.push(`🟢 BUY: ${buy.length} pair`);
+  lines.push(`🔴 SELL: ${sell.length} pair`);
+  lines.push(`🟡 NETRAL: ${netral.length} pair`);
+  lines.push('');
+  lines.push('*Detail:*');
+
+  // Urutkan: BUY dulu, lalu SELL, lalu NETRAL
+  const sorted = [...buy, ...sell, ...netral];
+  sorted.forEach(({ pair, analysis }) => {
+    const emoji = analysis.signal === 'BUY' ? '🟢' : analysis.signal === 'SELL' ? '🔴' : '🟡';
+    lines.push(`${emoji} \`${pair.display.padEnd(7)}\` → *${analysis.signal}*`);
+  });
+
+  lines.push('');
+  lines.push('📌 Detail per pair: `/signal <PAIR>`');
+  lines.push('⚠️ _Bukan saran finansial. Gunakan manajemen risiko._');
+
+  bot.editMessageText(lines.join('\n'), {
+    chat_id: chatId,
+    message_id: loadingMsg.message_id,
+    parse_mode: 'Markdown'
+  });
 });
 
 // ======================================================
