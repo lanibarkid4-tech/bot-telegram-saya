@@ -78,6 +78,45 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
+// Ambil harga REAL-TIME dari exchangerate.host (gratis, tanpa API key)
+// Update setiap beberapa menit - lebih akurat dari D1 historical
+async function getRealtimePrice(pair) {
+  try {
+    if (pair.source === 'yahoo') {
+      // Untuk commodity & index - pakai Yahoo Finance quote endpoint
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(pair.yahooSymbol)}?interval=1m&range=1d`;
+      const fetchRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (!fetchRes.ok) return null;
+      const data = await fetchRes.json();
+      const meta = data.chart && data.chart.result && data.chart.result[0] && data.chart.result[0].meta;
+      if (meta && meta.regularMarketPrice) {
+        return {
+          price: meta.regularMarketPrice,
+          previousClose: meta.chartPreviousClose || meta.previousClose,
+          source: 'yahoo-realtime'
+        };
+      }
+    } else {
+      // Untuk forex - pakai exchangerate.host
+      const url = `https://api.exchangerate.host/latest?base=${pair.base}&symbols=${pair.quote}`;
+      const fetchRes = await fetch(url);
+      if (!fetchRes.ok) return null;
+      const data = await fetchRes.json();
+      if (data.rates && data.rates[pair.quote]) {
+        return {
+          price: data.rates[pair.quote],
+          previousClose: null,
+          source: 'exchangerate.host'
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Realtime price error:', err.message);
+    return null;
+  }
+  return null;
+}
+
 // Ambil data historis 30 hari dari Frankfurter (gratis, tanpa API key)
 // Frankfurter = European Central Bank reference rates (hanya forex)
 async function getFrankfurterRates(base, quote) {
@@ -522,6 +561,11 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   // === INDIKATOR TEKNIKAL ===
   lines.push('💰 *Harga Saat Ini:*');
   lines.push(`   \`${analysis.currentPrice.toFixed(decimalPlaces)}\``);
+  if (analysis.realtimeSource) {
+    lines.push(`   _📡 Real-time (${analysis.realtimeSource})_`);
+  } else {
+    lines.push(`   _📊 Daily close (kemarin)_`);
+  }
   lines.push('');
 
   // === KETERANGAN HARGA ===
@@ -627,6 +671,22 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
 
   const analysis = generateSignal(prices);
 
+  // === AMBIL HARGA REAL-TIME (untuk akurasi) ===
+  // Historical price dipakai untuk analisa, real-time price untuk display
+  try {
+    const realtime = await getRealtimePrice(pair);
+    if (realtime && realtime.price) {
+      const oldPrice = analysis.currentPrice;
+      analysis.currentPrice = realtime.price;
+      // Update resistance/support juga dengan real-time price
+      if (analysis.resistance < realtime.price) analysis.resistance = realtime.price;
+      if (analysis.support > realtime.price) analysis.support = realtime.price;
+      analysis.realtimeSource = realtime.source;
+    }
+  } catch (err) {
+    console.error('Realtime fetch error:', err.message);
+  }
+
   // Import fundamental module
   const fundamentalMod = require('./fundamental');
   const fundamental = await fundamentalMod.analyzeFundamental(pair, prices);
@@ -642,7 +702,7 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     }
   }
 
-  // Hitung zones (dengan mode trading + M5 untuk scalping)
+  // Hitung zones (dengan mode trading + M5 untuk scalping) - pakai REAL-TIME price
   const atr = calculateATR(prices, 14);
   const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
   const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
@@ -689,5 +749,7 @@ module.exports = {
   SUPPORTED_PAIRS,
   findPair,
   getSignalForPair,
-  getAllSignals
+  getAllSignals,
+  getRealtimePrice,
+  TRADING_MODES
 };
