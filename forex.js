@@ -66,7 +66,8 @@ const SUPPORTED_PAIRS = [
   { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'frankfurter' },
   { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'frankfurter' },
   // Commodity & Index (via Yahoo Finance)
-  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold)', source: 'yahoo', yahooSymbol: 'GC=F' },
+  // XAU/USD SPOT forex (bukan futures) - lebih akurat untuk trader forex
+  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'yahoo', yahooSymbol: 'GC=F' },
   { symbol: 'NASDAQ', base: 'IXIC', quote: 'USD', display: 'NASDAQ (US100)', source: 'yahoo', yahooSymbol: '^IXIC' },
   { symbol: 'SPX',    base: 'GSPC', quote: 'USD', display: 'S&P 500',        source: 'yahoo', yahooSymbol: '^GSPC' },
   { symbol: 'DJI',    base: 'DJI',  quote: 'USD', display: 'Dow Jones',       source: 'yahoo', yahooSymbol: '^DJI' }
@@ -78,12 +79,41 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
-// Ambil harga REAL-TIME dari exchangerate.host (gratis, tanpa API key)
-// Update setiap beberapa menit - lebih akurat dari D1 historical
+// Ambil harga REAL-TIME
+// - Forex: exchangerate.host
+// - Gold (XAUUSD): gold-api.com (SPOT price, bukan futures!)
+// - Index: Yahoo Finance quote endpoint
 async function getRealtimePrice(pair) {
   try {
+    // KHUSUS XAUUSD: pakai gold-api.com untuk SPOT price (bukan futures)
+    if (pair.symbol === 'XAUUSD') {
+      const url = 'https://api.gold-api.com/price/XAU';
+      const fetchRes = await fetch(url);
+      if (!fetchRes.ok) return null;
+      const data = await fetchRes.json();
+      if (data && data.price) {
+        return {
+          price: data.price,
+          previousClose: null,
+          source: 'gold-api.com (SPOT)',
+          updatedAt: data.updatedAt
+        };
+      }
+      // Fallback ke Yahoo futures kalau gold-api gagal
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent('GC=F')}?interval=1m&range=1d`;
+      const yahooRes = await fetch(yahooUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      if (yahooRes.ok) {
+        const yahooData = await yahooRes.json();
+        const meta = yahooData.chart?.result?.[0]?.meta;
+        if (meta?.regularMarketPrice) {
+          return { price: meta.regularMarketPrice, source: 'yahoo-futures-fallback', previousClose: meta.chartPreviousClose };
+        }
+      }
+      return null;
+    }
+
     if (pair.source === 'yahoo') {
-      // Untuk commodity & index - pakai Yahoo Finance quote endpoint
+      // Untuk index - pakai Yahoo Finance quote endpoint
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(pair.yahooSymbol)}?interval=1m&range=1d`;
       const fetchRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!fetchRes.ok) return null;
@@ -433,7 +463,7 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
 }
 
 // Hitung Probability Score (0-100%)
-function calculateProbability(analysis, fundamental, regime, volatility) {
+function calculateProbability(analysis, fundamental, regime, volatility, m5Confirmation = null) {
   let score = 50; // baseline
 
   // 1. RSI contribution (max ±15)
@@ -470,12 +500,25 @@ function calculateProbability(analysis, fundamental, regime, volatility) {
   if (volatility.level === 'HIGH') score -= 5;
   if (volatility.level === 'LOW') score += 3;
 
+  // 6. M5 KONFIRMASI (max ±15) - validasi entry di timeframe kecil
+  if (m5Confirmation) {
+    if (m5Confirmation.status === 'CONFIRM') {
+      score += 12; // M5 konfirmasi → signal kuat
+    } else if (m5Confirmation.status === 'CONFLICT') {
+      score -= 15; // M5 kontradiksi → jangan entry
+    }
+    // M5 RSI extreme untuk validasi
+    if (m5Confirmation.m5RSI > 70 || m5Confirmation.m5RSI < 30) {
+      score += 3; // M5 juga overbought/oversold, tambah keyakinan
+    }
+  }
+
   // Clamp 5-95
   return Math.max(5, Math.min(95, Math.round(score)));
 }
 
 // Format hasil signal jadi pesan Telegram
-function formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf) {
+function formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation) {
   const isJPY = pair.quote === 'JPY';
   const decimalPlaces = isJPY ? 3 : 5;
   const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
@@ -494,6 +537,14 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   let probLabel = 'RENDAH';
   if (probability >= 75) probLabel = 'TINGGI';
   else if (probability >= 55) probLabel = 'SEDANG';
+
+  // Emoji M5 confirmation
+  const m5Emoji = m5Confirmation
+    ? (m5Confirmation.status === 'CONFIRM' ? '✅' : m5Confirmation.status === 'CONFLICT' ? '⚠️' : '➖')
+    : '➖';
+  const m5Status = m5Confirmation
+    ? (m5Confirmation.status === 'CONFIRM' ? 'MENGKONFIRMASI' : m5Confirmation.status === 'CONFLICT' ? 'BERTENTANGAN' : 'NETRAL')
+    : 'TIDAK ADA DATA';
 
   const lines = [];
   lines.push(`📊 *SIGNAL: ${pair.display}*`);
@@ -585,11 +636,26 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   lines.push(`   📏 *Pip Value:* ${decimalPlaces} angka di belakang koma`);
   lines.push('');
 
-  lines.push('📈 *Indikator (D1):*');
+  // === INDIKATOR H1 (UTAMA) ===
+  const tfName = analysis.primaryTimeframe || 'D1';
+  lines.push(`📈 *Indikator (${tfName}) - Analisa Utama:*`);
   lines.push(`• RSI (14): \`${analysis.rsi.toFixed(1)}\` ${analysis.rsi > 70 ? '(Overbought)' : analysis.rsi < 30 ? '(Oversold)' : '(Netral)'}`);
   lines.push(`• SMA 7: \`${analysis.sma7.toFixed(decimalPlaces)}\` ${analysis.currentPrice > analysis.sma7 ? '(Harga di atas SMA7 = Bullish)' : '(Harga di bawah SMA7 = Bearish)'}`);
   lines.push(`• SMA 21: \`${analysis.sma21.toFixed(decimalPlaces)}\` ${analysis.currentPrice > analysis.sma21 ? '(Harga di atas SMA21 = Bullish)' : '(Harga di bawah SMA21 = Bearish)'}`);
   lines.push('');
+
+  // === M5 KONFIRMASI ENTRY ===
+  if (m5Confirmation && m5Confirmation.status !== 'NONE') {
+    const confEmoji = m5Confirmation.status === 'CONFIRM' ? '✅' : '⚠️';
+    const confText = m5Confirmation.status === 'CONFIRM'
+      ? `M5 MENGKONFIRMASI signal ${tfName} → AMAN ENTRY`
+      : `M5 BERTENTANGAN dengan signal ${tfName} → TUNGGU!`;
+
+    lines.push(`${confEmoji} *M5 Konfirmasi:* ${confText}`);
+    lines.push(`   • ${tfName} signal: ${m5Confirmation.h1Trend}`);
+    lines.push(`   • M5 signal: ${m5Confirmation.m5Trend} (RSI ${m5Confirmation.m5RSI?.toFixed(1)})`);
+    lines.push('');
+  }
 
   // === ENTRY TIMING (M3/M5) ===
   if (mtf && (mtf.entry.M5 || mtf.entry.M3)) {
@@ -669,14 +735,41 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     };
   }
 
-  const analysis = generateSignal(prices);
+  // === AMBIL DATA H1 DARI YAHOO UNTUK ANALISA UTAMA ===
+  // Untuk pair Yahoo, pakai data H1 (bukan D1) sebagai basis analisa
+  // Untuk pair forex, tetap pakai D1 dari Frankfurter (H1 forex gratis sulit)
+  let h1Prices = null;
+  let mtf = null;
+  let primaryTimeframe = 'D1';
+
+  if (pair.source === 'yahoo' && pair.yahooSymbol) {
+    try {
+      const tfMod = require('./timeframe');
+      mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
+
+      // Ambil data H1 untuk analisa utama
+      if (mtf && mtf.analysis && mtf.analysis.H1 && mtf.analysis.H1.bars > 20) {
+        // Re-fetch data H1 mentah untuk generateSignal
+        const h1Fetch = await tfMod.fetchYahooInterval(pair.yahooSymbol, '1h', '30d');
+        if (h1Fetch.success && h1Fetch.prices && h1Fetch.prices.length >= 21) {
+          h1Prices = h1Fetch.prices;
+          primaryTimeframe = 'H1';
+        }
+      }
+    } catch (err) {
+      console.error('H1 fetch error:', err.message);
+    }
+  }
+
+  // Generate analisa dari H1 (jika ada), fallback ke D1
+  const analysis = h1Prices ? generateSignal(h1Prices) : generateSignal(prices);
+  analysis.primaryTimeframe = primaryTimeframe;
 
   // === AMBIL HARGA REAL-TIME (untuk akurasi) ===
   // Historical price dipakai untuk analisa, real-time price untuk display
   try {
     const realtime = await getRealtimePrice(pair);
     if (realtime && realtime.price) {
-      const oldPrice = analysis.currentPrice;
       analysis.currentPrice = realtime.price;
       // Update resistance/support juga dengan real-time price
       if (analysis.resistance < realtime.price) analysis.resistance = realtime.price;
@@ -687,28 +780,49 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     console.error('Realtime fetch error:', err.message);
   }
 
-  // Import fundamental module
+  // Import fundamental module - dengan data H1 jika ada
   const fundamentalMod = require('./fundamental');
-  const fundamental = await fundamentalMod.analyzeFundamental(pair, prices);
+  const fundamental = await fundamentalMod.analyzeFundamental(pair, h1Prices || prices);
 
-  // MTF analysis (hanya untuk pair Yahoo)
-  let mtf = null;
-  if (pair.source === 'yahoo' && pair.yahooSymbol) {
-    try {
-      const tfMod = require('./timeframe');
-      mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
-    } catch (err) {
-      console.error('MTF error:', err.message);
+  // === M5 KONFIRMASI UNTUK ENTRY ===
+  // Cek apakah M5 mengkonfirmasi signal dari H1/D1
+  let m5Confirmation = null;
+  if (mtf && mtf.entry && mtf.entry.M5 && mtf.entry.M5.prices && mtf.entry.M5.prices.length >= 14) {
+    const m5Signal = generateSignal(mtf.entry.M5.prices);
+    const m5Trend = m5Signal.signal;
+    const h1Trend = analysis.signal;
+
+    // Hitung apakah M5 konfirmasi atau kontradiksi
+    let confirmStatus = 'NONE';
+    if (m5Trend === h1Trend && h1Trend !== 'NETRAL') {
+      confirmStatus = 'CONFIRM'; // M5 searah dengan H1
+    } else if (m5Trend !== h1Trend && m5Trend !== 'NETRAL' && h1Trend !== 'NETRAL') {
+      confirmStatus = 'CONFLICT'; // M5 berlawanan dengan H1
+    }
+
+    m5Confirmation = {
+      m5Trend,
+      h1Trend,
+      m5RSI: m5Signal.rsi,
+      m5Signal,
+      status: confirmStatus
+    };
+
+    // Bonus/penalty probability berdasarkan M5 confirmation
+    if (confirmStatus === 'CONFIRM') {
+      // M5 konfirmasi → tambah probability
+    } else if (confirmStatus === 'CONFLICT') {
+      // M5 kontradiksi → kurangi probability
     }
   }
 
   // Hitung zones (dengan mode trading + M5 untuk scalping) - pakai REAL-TIME price
-  const atr = calculateATR(prices, 14);
+  const atr = calculateATR(h1Prices || prices, 14);
   const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
   const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
 
-  // Hitung probability (bonus jika MTF searah)
-  let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility);
+  // Hitung probability dengan M5 confirmation
+  let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility, m5Confirmation);
 
   if (mtf && mtf.confluence && mtf.confluence.score >= 80) {
     // MTF confluence tinggi → probability bonus
@@ -724,7 +838,7 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     }
   }
 
-  const message = formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf);
+  const message = formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation);
   return { success: true, message };
 }
 
