@@ -821,29 +821,40 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     };
   }
 
-  // === AMBIL DATA D1 UNTUK ANALISA UTAMA (BIAS D1) ===
-  // Strategi: analisa utama selalu pakai D1 (daily timeframe)
-  // - Pair Yahoo: ambil D1 dari Yahoo (30 hari terakhir)
-  // - Pair forex: sudah dari Frankfurter (D1)
-  // - MTF tetap dipakai untuk konfirmasi tren di TF lain (H4, H1, M30, M15, M5)
+  // === AMBIL DATA UNTUK ANALISA UTAMA ===
+  // Strategi terbaru (agar akurat seperti TradingView):
+  // - Pair Yahoo (XAUUSD, NASDAQ, SPX, DJI): pakai H1 dari Yahoo sebagai primary
+  //   (karena Yahoo D1 untuk GC=F = futures, bukan spot. H1 lebih representatif)
+  // - Pair forex: pakai D1 dari Fawaz (sudah spot, akurat)
+  // - MTF tetap dipakai untuk konfirmasi tren di TF lain
   let mtf = null;
   let primaryTimeframe = 'D1';
+  let analysisPrices = prices; // default D1
 
   if (pair.source === 'yahoo' && pair.yahooSymbol) {
     try {
       const tfMod = require('./timeframe');
       mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
-      // Pakai D1 sebagai primary bias, MTF hanya untuk konfirmasi
-      console.log(`✓ D1 bias for ${pair.symbol}, MTF analysis loaded`);
+
+      // Ambil data H1 untuk analisa utama (lebih akurat dari D1 futures)
+      if (mtf && mtf.analysis && mtf.analysis.H1 && mtf.analysis.H1.prices && mtf.analysis.H1.prices.length >= 21) {
+        analysisPrices = mtf.analysis.H1.prices;
+        primaryTimeframe = 'H1';
+        console.log(`✓ H1 bias for ${pair.symbol}: ${analysisPrices.length} bars (MTF D1/H4/H1/M30/M15 dimuat)`);
+      } else {
+        console.log(`⚠ H1 not available for ${pair.symbol}, pakai D1 (Yahoo)`);
+      }
     } catch (err) {
       console.error('MTF fetch error:', err.message);
     }
+  } else {
+    console.log(`✓ D1 bias for ${pair.symbol} (forex dari Fawaz spot)`);
   }
 
-  // Generate analisa dari D1 (prices dari parameter = D1 historical)
-  const analysis = generateSignal(prices);
+  // Generate analisa dari H1 (jika Yahoo) atau D1 (jika forex)
+  const analysis = generateSignal(analysisPrices);
   analysis.primaryTimeframe = primaryTimeframe;
-  analysis.h1Available = false;
+  analysis.h1Available = primaryTimeframe === 'H1';
 
   // === AMBIL HARGA REAL-TIME (untuk akurasi) ===
   // Historical price dipakai untuk analisa, real-time price untuk display
@@ -860,29 +871,29 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     console.error('Realtime fetch error:', err.message);
   }
 
-  // Import fundamental module - dengan data D1
+  // Import fundamental module - dengan data H1/D1 (analysisPrices)
   const fundamentalMod = require('./fundamental');
-  const fundamental = await fundamentalMod.analyzeFundamental(pair, prices);
+  const fundamental = await fundamentalMod.analyzeFundamental(pair, analysisPrices);
 
   // === M5 KONFIRMASI UNTUK ENTRY ===
-  // Cek apakah M5 mengkonfirmasi signal dari D1
+  // Cek apakah M5 mengkonfirmasi signal dari primary TF (H1 atau D1)
   let m5Confirmation = null;
   if (mtf && mtf.entry && mtf.entry.M5 && mtf.entry.M5.prices && mtf.entry.M5.prices.length >= 14) {
     const m5Signal = generateSignal(mtf.entry.M5.prices);
     const m5Trend = m5Signal.signal;
-    const d1Trend = analysis.signal;
+    const primaryTrend = analysis.signal;
 
     // Hitung apakah M5 konfirmasi atau kontradiksi
     let confirmStatus = 'NONE';
-    if (m5Trend === d1Trend && d1Trend !== 'NETRAL') {
-      confirmStatus = 'CONFIRM'; // M5 searah dengan D1
-    } else if (m5Trend !== d1Trend && m5Trend !== 'NETRAL' && d1Trend !== 'NETRAL') {
-      confirmStatus = 'CONFLICT'; // M5 berlawanan dengan D1
+    if (m5Trend === primaryTrend && primaryTrend !== 'NETRAL') {
+      confirmStatus = 'CONFIRM'; // M5 searah dengan primary
+    } else if (m5Trend !== primaryTrend && m5Trend !== 'NETRAL' && primaryTrend !== 'NETRAL') {
+      confirmStatus = 'CONFLICT'; // M5 berlawanan dengan primary
     }
 
     m5Confirmation = {
       m5Trend,
-      h1Trend: d1Trend,  // keep field name for display compat
+      h1Trend: primaryTrend,  // keep field name for display compat
       m5RSI: m5Signal.rsi,
       m5Signal,
       status: confirmStatus
@@ -890,7 +901,7 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   }
 
   // Hitung zones (dengan mode trading + M5 untuk scalping) - pakai REAL-TIME price
-  const atr = calculateATR(prices, 14);
+  const atr = calculateATR(analysisPrices, 14);
   const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
   const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
 
