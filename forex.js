@@ -1,13 +1,19 @@
 // ======================================================
-//  📊 MODULE FOREX SIGNAL - GRATIS (Tanpa API Key)
+//  📊 MODULE FOREX SIGNAL - OANDA API
 // ======================================================
-//  Sumber data HANYA dari FRANKFURTER (European Central Bank)
-//  - SUMBER RESMI TradingView untuk forex D1 historical
-//  - GRATIS, tanpa API key, tanpa registrasi
-//  - Update harian, data lengkap 30+ mata uang
-//  - TIDAK ADA YAHOO, TIDAK ADA FAWAZ, TIDAK ADA GOLD/INDEX
+//  Sumber data: OANDA v20 REST API
+//  - Real-time & historical forex data (D, H4, H1, M30, M15, M5, M1)
+//  - Support forex pairs (EURUSD, GBPUSD, dll) + XAU/USD (Gold Spot)
+//  - GRATIS untuk OANDA customer (perlu API key)
 //
-//  PASANG PAIR YANG DIDUKUNG (30 pair forex):
+//  CARA SETUP OANDA API KEY:
+//  1. Daftar akun OANDA: https://www.oanda.com/register/
+//  2. Login → Manage API Access
+//  3. Generate Personal Access Token
+//  4. Set environment variable OANDA_API_KEY di Railway
+//  5. (Opsional) Set OANDA_ACCOUNT_ID jika bukan default
+//
+//  PAIR YANG DIDUKUNG:
 //  Major : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD
 //  Cross : EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
 //  Exotic: EURSEK, EURNOK, EURPLN, EURTRY, EURHUF, EURCZK,
@@ -56,12 +62,11 @@ const TRADING_MODES = {
 };
 
 // Daftar pair forex yang didukung
-// SEMUA PAIR HANYA DARI FRANKFURTER (ECB) - TIDAK ADA YAHOO/FAWAZ
-// Frankfurter = European Central Bank reference rates
-// SUMBER RESMI TradingView untuk forex D1 historical
-// Gratis, tanpa API key, update harian
-// Catatan: XAU/XAG (emas/perak) TIDAK ADA di Frankfurter - pair emas dihapus
-//          Indeks saham (NASDAQ, SPX, DJI) TIDAK ADA di Frankfurter - dihapus
+// - 30 pair FOREX dari FRANKFURTER (ECB) - sumber resmi TradingView, gratis, no key
+// - XAUUSD (Gold Spot) dari FAWAZ - satu-satunya sumber gold spot gratis tanpa API key
+//   (Frankfurter/ECB tidak ada XAU, semua API gold berbayar butuh key)
+//   TIDAK ADA YAHOO sama sekali
+//   Indeks saham TIDAK ADA (NASDAQ, SPX, DJI dihapus)
 const SUPPORTED_PAIRS = [
   // Forex utama
   { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'frankfurter' },
@@ -95,7 +100,9 @@ const SUPPORTED_PAIRS = [
   { symbol: 'USDIDR', base: 'USD', quote: 'IDR', display: 'USD/IDR', source: 'frankfurter' },
   { symbol: 'USDPHP', base: 'USD', quote: 'PHP', display: 'USD/PHP', source: 'frankfurter' },
   { symbol: 'USDMYR', base: 'USD', quote: 'MYR', display: 'USD/MYR', source: 'frankfurter' },
-  { symbol: 'USDBRL', base: 'USD', quote: 'BRL', display: 'USD/BRL', source: 'frankfurter' }
+  { symbol: 'USDBRL', base: 'USD', quote: 'BRL', display: 'USD/BRL', source: 'frankfurter' },
+  // Gold Spot XAU/USD - sumber FAWAZ (satu-satunya free tanpa key, tanpa Yahoo)
+  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'fawaz' }
 ];
 
 // Cari object pair dari simbol (case-insensitive, tanpa slash)
@@ -104,92 +111,115 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
-// Ambil harga REAL-TIME dari FRANKFURTER (ECB) - TIDAK ADA YAHOO/FAWAZ
+// Ambil harga REAL-TIME dari OANDA API
+// Endpoint: GET /v3/accounts/{accountID}/pricing
+// Untuk simplicity, pakai pricing endpoint: /v3/instruments/{symbol}/candles?count=1
 async function getRealtimePrice(pair) {
+  const apiKey = getOandaApiKey();
+  if (!apiKey) {
+    console.error('❌ OANDA_API_KEY belum diset');
+    return null;
+  }
   try {
-    // Frankfurter ECB latest endpoint
-    const url = `https://api.frankfurter.app/latest?from=${pair.base}&to=${pair.quote}`;
-    const r = await fetchFollowRedirect(url);
+    const symbol = toOandaSymbol(pair.base, pair.quote);
+    // Ambil candle terakhir (granularity M1, count=1) untuk real-time price
+    const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=M1&count=1&price=MBA`;
+    const r = await fetchOanda(url, { 'Authorization': `Bearer ${apiKey}` });
     if (!r.ok) return null;
     const data = await r.json();
-    if (data && data.rates && data.rates[pair.quote]) {
+    if (!data || !data.candles || data.candles.length === 0) return null;
+    const last = data.candles[data.candles.length - 1];
+    if (last && last.mid && last.mid.c) {
       return {
-        price: data.rates[pair.quote],
+        price: parseFloat(last.mid.c),
         previousClose: null,
-        source: `Frankfurter ECB (SPOT ${pair.base}/${pair.quote})`
+        source: `OANDA API (SPOT ${pair.base}/${pair.quote})`
       };
     }
     return null;
   } catch (err) {
-    console.error('Realtime price error:', err.message);
+    console.error('Realtime OANDA error:', err.message);
     return null;
   }
 }
 
 // ======================================================
-//  📡 SUMBER DATA FOREX: FRANKFURTER (ECB) + FAWAZ BACKUP
+//  📡 SUMBER DATA FOREX: OANDA API (PRIMARY)
 // ======================================================
-//  Frankfurter (api.frankfurter.app) - SUMBER RESMI TradingView untuk forex
-//  - Data dari European Central Bank (ECB), bank sentral resmi
-//  - GRATIS, tanpa API key
-//  - 1 request untuk 30 hari historical (timeseries endpoint)
-//  - Update harian
-//  - Coverage: 30+ mata uang termasuk EUR, GBP, JPY, CHF, AUD, CAD, NZD
-//  - XAU/XAG tidak ada di Frankfurter → fallback ke Fawaz
+//  OANDA v20 REST API - data forex dari broker OANDA
+//  - Real-time & historical data (granularity: D/H4/H1/M30/M15/M5/M1)
+//  - Mendukung forex pairs (EURUSD, GBPUSD, dll) + XAU/USD (Gold Spot)
+//  - GRATIS untuk OANDA customer (perlu API key dari dashboard OANDA)
+//  - Tidak ada tier gratis untuk non-customer (perlu akun broker)
 //
-//  Fawaz (cdn.jsdelivr.net/@fawazahmed0) sebagai backup:
-//  - Lebih lengkap (XAU, XAG, crypto, dll)
-//  - Spot, no key, update harian
+//  CARA SETUP:
+//  1. Daftar akun OANDA: https://www.oanda.com/register/
+//  2. Login → My Account → Manage API Access
+//  3. Generate Personal Access Token
+//  4. Set environment variable OANDA_API_KEY di Railway
+//
+//  Pair OANDA format: EUR_USD (underscore, not slash)
+//  XAUUSD di OANDA: XAU_USD
 // ======================================================
 
-// Helper: fetch dengan auto-follow redirect
-async function fetchFollowRedirect(url, headers = {}) {
+// Helper: fetch dengan timeout
+async function fetchOanda(url, headers = {}) {
   return new Promise((resolve) => {
-    const doFetch = (u) => {
-      const lib = u.startsWith('https') ? require('https') : require('http');
-      lib.get(u, { headers: { 'User-Agent': 'Mozilla/5.0', ...headers } }, (res) => {
-        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-          const newUrl = res.headers.location.startsWith('http') ? res.headers.location : new URL(res.headers.location, u).href;
-          return doFetch(newUrl);
-        }
-        let data = '';
-        res.on('data', c => data += c);
-        res.on('end', () => resolve({ ok: res.statusCode === 200, status: res.statusCode, json: () => Promise.resolve(safeJson(data)) }));
-      }).on('error', e => resolve({ ok: false, status: 0, error: e.message }));
-    };
-    doFetch(url);
+    const req = require('https').get(url, { headers: { 'User-Agent': 'Mozilla/5.0', ...headers }, timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve({ ok: res.statusCode === 200, status: res.statusCode, json: () => Promise.resolve(safeJson(data)), body: data }));
+    });
+    req.on('error', e => resolve({ ok: false, status: 0, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, error: 'timeout' }); });
   });
 }
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
-// Ambil data historis forex dari FRANKFURTER (ECB) - SATU-SATUNYA SUMBER
-// European Central Bank reference rates (ECB)
-// SUMBER RESMI TradingView untuk forex D1 historical
-// Gratis, tanpa API key, tanpa registrasi
-// Update harian
-async function getFrankfurterRates(base, quote) {
-  try {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 60);
-    const fmt = d => d.toISOString().split('T')[0];
-    const url = `https://api.frankfurter.app/${fmt(startDate)}..${fmt(endDate)}?from=${base}&to=${quote}`;
-    const r = await fetchFollowRedirect(url);
-    if (!r.ok) return null;
-    const data = await r.json();
-    if (data && data.rates) {
-      const prices = Object.keys(data.rates).sort().map(date => data.rates[date][quote]).filter(v => v !== undefined);
-      if (prices.length >= 20) {
-        console.log(`✓ ${base}/${quote} from Frankfurter ECB: ${prices.length} days`);
-        return prices;
-      }
-    }
-    return null;
-  } catch (e) {
-    console.error(`Frankfurter error for ${base}/${quote}:`, e.message);
+// Helper: convert pair format (EURUSD -> EUR_USD)
+function toOandaSymbol(base, quote) {
+  return `${base}_${quote}`;
+}
+
+// Ambil API key dari environment variable
+function getOandaApiKey() {
+  return process.env.OANDA_API_KEY || '';
+}
+
+// Ambil data historis D1 dari OANDA
+// Endpoint: GET /v3/instruments/{instrument}/candles?granularity=D&count=N
+async function getOandaHistoricalRates(base, quote, granularity = 'D', count = 60) {
+  const apiKey = getOandaApiKey();
+  if (!apiKey) {
+    console.error('❌ OANDA_API_KEY belum diset di environment variable');
     return null;
   }
+  const symbol = toOandaSymbol(base, quote);
+  // Pakai practice endpoint (fxpractice) untuk aman. Bisa diganti fxtrade untuk live
+  const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=${granularity}&count=${count}&price=MBA`;
+  const r = await fetchOanda(url, { 'Authorization': `Bearer ${apiKey}` });
+  if (!r.ok) {
+    const errMsg = r.body ? r.body.substring(0, 200) : r.error || 'no response';
+    console.error(`❌ OANDA error for ${symbol}: ${r.status} ${errMsg}`);
+    return null;
+  }
+  const data = await r.json();
+  if (!data || !data.candles) return null;
+  // Ambil close price (mid) dari setiap candle
+  const prices = data.candles
+    .filter(c => c.complete && c.mid && c.mid.c)
+    .map(c => parseFloat(c.mid.c));
+  if (prices.length >= 20) {
+    console.log(`✓ ${base}/${quote} from OANDA: ${prices.length} bars (granularity ${granularity})`);
+    return prices;
+  }
+  return null;
+}
+
+// Alias untuk backward compat dengan kode yang panggil getFrankfurterRates
+async function getFrankfurterRates(base, quote) {
+  return getOandaHistoricalRates(base, quote, 'D', 60);
 }
 
 // Dispatch ke Frankfurter (satu-satunya sumber)
