@@ -210,6 +210,20 @@ function generateSignal(prices) {
   const resistance = Math.max(...recentPrices);
   const support = Math.min(...recentPrices);
 
+  // === KETERANGAN HARGA ===
+  // Perubahan harga 1 hari (%)
+  const price1dAgo = prices[prices.length - 2] || currentPrice;
+  const priceChange1d = ((currentPrice - price1dAgo) / price1dAgo) * 100;
+
+  // Perubahan harga 7 hari (%)
+  const price7dAgo = prices[prices.length - 8] || currentPrice;
+  const priceChange7d = ((currentPrice - price7dAgo) / price7dAgo) * 100;
+
+  // High/Low 7 hari
+  const last7 = prices.slice(-7);
+  const high7d = Math.max(...last7);
+  const low7d = Math.min(...last7);
+
   return {
     signal,
     strength,
@@ -219,7 +233,11 @@ function generateSignal(prices) {
     sma21,
     rsi,
     resistance,
-    support
+    support,
+    priceChange1d,
+    priceChange7d,
+    high7d,
+    low7d
   };
 }
 
@@ -502,13 +520,31 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   }
 
   // === INDIKATOR TEKNIKAL ===
-  lines.push('💰 *Harga:*');
-  lines.push(`\`${analysis.currentPrice.toFixed(decimalPlaces)}\``);
+  lines.push('💰 *Harga Saat Ini:*');
+  lines.push(`   \`${analysis.currentPrice.toFixed(decimalPlaces)}\``);
   lines.push('');
+
+  // === KETERANGAN HARGA ===
+  // Hitung perubahan harga (1 hari, 7 hari) dari data D1
+  // Kita gunakan prices array yang sudah di-pass via analysis
+  const priceChange1d = (analysis.priceChange1d || 0).toFixed(2);
+  const priceChange7d = (analysis.priceChange7d || 0).toFixed(2);
+  const priceRange7d = `${analysis.low7d?.toFixed(decimalPlaces)} - ${analysis.high7d?.toFixed(decimalPlaces)}`;
+
+  const changeEmoji1d = analysis.priceChange1d > 0 ? '📈' : analysis.priceChange1d < 0 ? '📉' : '➖';
+  const changeEmoji7d = analysis.priceChange7d > 0 ? '📈' : analysis.priceChange7d < 0 ? '📉' : '➖';
+
+  lines.push('💵 *Keterangan Harga:*');
+  lines.push(`   ${changeEmoji1d} *24 jam:* ${priceChange1d > 0 ? '+' : ''}${priceChange1d}%`);
+  lines.push(`   ${changeEmoji7d} *7 hari:* ${priceChange7d > 0 ? '+' : ''}${priceChange7d}%`);
+  lines.push(`   📊 *Range 7 hari:* \`${priceRange7d}\``);
+  lines.push(`   📏 *Pip Value:* ${decimalPlaces} angka di belakang koma`);
+  lines.push('');
+
   lines.push('📈 *Indikator (D1):*');
-  lines.push(`• RSI (14): \`${analysis.rsi.toFixed(1)}\``);
-  lines.push(`• SMA 7: \`${analysis.sma7.toFixed(decimalPlaces)}\``);
-  lines.push(`• SMA 21: \`${analysis.sma21.toFixed(decimalPlaces)}\``);
+  lines.push(`• RSI (14): \`${analysis.rsi.toFixed(1)}\` ${analysis.rsi > 70 ? '(Overbought)' : analysis.rsi < 30 ? '(Oversold)' : '(Netral)'}`);
+  lines.push(`• SMA 7: \`${analysis.sma7.toFixed(decimalPlaces)}\` ${analysis.currentPrice > analysis.sma7 ? '(Harga di atas SMA7 = Bullish)' : '(Harga di bawah SMA7 = Bearish)'}`);
+  lines.push(`• SMA 21: \`${analysis.sma21.toFixed(decimalPlaces)}\` ${analysis.currentPrice > analysis.sma21 ? '(Harga di atas SMA21 = Bullish)' : '(Harga di bawah SMA21 = Bearish)'}`);
   lines.push('');
 
   // === ENTRY TIMING (M3/M5) ===
