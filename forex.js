@@ -1,16 +1,18 @@
 // ======================================================
 //  📊 MODULE FOREX SIGNAL - GRATIS (Tanpa API Key)
 // ======================================================
-//  Mengambil data historis dari Frankfurter API (ECB)
-//  dan Yahoo Finance (untuk commodity & index).
-//  Signal trading berbasis indikator SMA crossover + RSI.
-//  Support Multi-Timeframe + 3 Mode (Scalping/Swing/Intraday).
+//  Sumber data HANYA dari FRANKFURTER (European Central Bank)
+//  - SUMBER RESMI TradingView untuk forex D1 historical
+//  - GRATIS, tanpa API key, tanpa registrasi
+//  - Update harian, data lengkap 30+ mata uang
+//  - TIDAK ADA YAHOO, TIDAK ADA FAWAZ, TIDAK ADA GOLD/INDEX
 //
-//  PASANG PAIR YANG DIDUKUNG:
-//  Forex  : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD,
-//           NZDUSD, EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
-//  Logam  : XAUUSD (Gold)
-//  Index  : NASDAQ (US100), SPX (S&P 500), DJI (Dow Jones)
+//  PASANG PAIR YANG DIDUKUNG (30 pair forex):
+//  Major : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD
+//  Cross : EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
+//  Exotic: EURSEK, EURNOK, EURPLN, EURTRY, EURHUF, EURCZK,
+//          EURCNY, EURINR, USDMXN, USDSGD, USDHKD, USDZAR,
+//          USDKRW, USDTHB, USDIDR, USDPHP, USDMYR, USDBRL
 // ======================================================
 
 // Import helper untuk analisa trend (untuk entry timing M3/M5)
@@ -54,8 +56,14 @@ const TRADING_MODES = {
 };
 
 // Daftar pair forex yang didukung
+// SEMUA PAIR HANYA DARI FRANKFURTER (ECB) - TIDAK ADA YAHOO/FAWAZ
+// Frankfurter = European Central Bank reference rates
+// SUMBER RESMI TradingView untuk forex D1 historical
+// Gratis, tanpa API key, update harian
+// Catatan: XAU/XAG (emas/perak) TIDAK ADA di Frankfurter - pair emas dihapus
+//          Indeks saham (NASDAQ, SPX, DJI) TIDAK ADA di Frankfurter - dihapus
 const SUPPORTED_PAIRS = [
-  // Forex
+  // Forex utama
   { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'frankfurter' },
   { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD', source: 'frankfurter' },
   { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY', source: 'frankfurter' },
@@ -63,17 +71,31 @@ const SUPPORTED_PAIRS = [
   { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD', source: 'frankfurter' },
   { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD', source: 'frankfurter' },
   { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD', source: 'frankfurter' },
+  // Cross pairs
   { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY', source: 'frankfurter' },
   { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY', source: 'frankfurter' },
   { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP', source: 'frankfurter' },
   { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'frankfurter' },
   { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'frankfurter' },
-  // Commodity & Index (via Yahoo Finance)
-  // XAU/USD SPOT forex (bukan futures) - lebih akurat untuk trader forex
-  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'yahoo', yahooSymbol: 'GC=F' },
-  { symbol: 'NASDAQ', base: 'IXIC', quote: 'USD', display: 'NASDAQ (US100)', source: 'yahoo', yahooSymbol: '^IXIC' },
-  { symbol: 'SPX',    base: 'GSPC', quote: 'USD', display: 'S&P 500',        source: 'yahoo', yahooSymbol: '^GSPC' },
-  { symbol: 'DJI',    base: 'DJI',  quote: 'USD', display: 'Dow Jones',       source: 'yahoo', yahooSymbol: '^DJI' }
+  // Exotic pairs (Frankfurter support)
+  { symbol: 'EURSEK', base: 'EUR', quote: 'SEK', display: 'EUR/SEK', source: 'frankfurter' },
+  { symbol: 'EURNOK', base: 'EUR', quote: 'NOK', display: 'EUR/NOK', source: 'frankfurter' },
+  { symbol: 'EURPLN', base: 'EUR', quote: 'PLN', display: 'EUR/PLN', source: 'frankfurter' },
+  { symbol: 'EURTRY', base: 'EUR', quote: 'TRY', display: 'EUR/TRY', source: 'frankfurter' },
+  { symbol: 'EURHUF', base: 'EUR', quote: 'HUF', display: 'EUR/HUF', source: 'frankfurter' },
+  { symbol: 'EURCZK', base: 'EUR', quote: 'CZK', display: 'EUR/CZK', source: 'frankfurter' },
+  { symbol: 'EURCNY', base: 'EUR', quote: 'CNY', display: 'EUR/CNY', source: 'frankfurter' },
+  { symbol: 'EURINR', base: 'EUR', quote: 'INR', display: 'EUR/INR', source: 'frankfurter' },
+  { symbol: 'USDMXN', base: 'USD', quote: 'MXN', display: 'USD/MXN', source: 'frankfurter' },
+  { symbol: 'USDSGD', base: 'USD', quote: 'SGD', display: 'USD/SGD', source: 'frankfurter' },
+  { symbol: 'USDHKD', base: 'USD', quote: 'HKD', display: 'USD/HKD', source: 'frankfurter' },
+  { symbol: 'USDZAR', base: 'USD', quote: 'ZAR', display: 'USD/ZAR', source: 'frankfurter' },
+  { symbol: 'USDKRW', base: 'USD', quote: 'KRW', display: 'USD/KRW', source: 'frankfurter' },
+  { symbol: 'USDTHB', base: 'USD', quote: 'THB', display: 'USD/THB', source: 'frankfurter' },
+  { symbol: 'USDIDR', base: 'USD', quote: 'IDR', display: 'USD/IDR', source: 'frankfurter' },
+  { symbol: 'USDPHP', base: 'USD', quote: 'PHP', display: 'USD/PHP', source: 'frankfurter' },
+  { symbol: 'USDMYR', base: 'USD', quote: 'MYR', display: 'USD/MYR', source: 'frankfurter' },
+  { symbol: 'USDBRL', base: 'USD', quote: 'BRL', display: 'USD/BRL', source: 'frankfurter' }
 ];
 
 // Cari object pair dari simbol (case-insensitive, tanpa slash)
@@ -82,139 +104,96 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
-// Ambil harga REAL-TIME dari Fawaz (SPOT, no key)
-// - Forex & XAUUSD: Fawaz currency-api
-// - Index: Yahoo Finance quote endpoint
+// Ambil harga REAL-TIME dari FRANKFURTER (ECB) - TIDAK ADA YAHOO/FAWAZ
 async function getRealtimePrice(pair) {
   try {
-    // KHUSUS XAUUSD & semua pair forex/non-yahoo: pakai Fawaz (SPOT)
-    if (pair.source !== 'yahoo' || pair.symbol === 'XAUUSD') {
-      // Tentukan base & quote yang dipakai di Fawaz
-      let base, quote;
-      if (pair.symbol === 'XAUUSD') {
-        base = 'XAU'; quote = 'USD';
-      } else {
-        base = pair.base; quote = pair.quote;
-      }
-      const baseLow = base.toLowerCase();
-      const quoteLow = quote.toLowerCase();
-      const url = `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${baseLow}.json`;
-      const fetchRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!fetchRes.ok) return null;
-      const data = await fetchRes.json();
-      if (data[baseLow] && data[baseLow][quoteLow]) {
-        return {
-          price: data[baseLow][quoteLow],
-          previousClose: null,
-          source: `fawazahmed0 (SPOT ${base}/${quote})`
-        };
-      }
-      return null;
+    // Frankfurter ECB latest endpoint
+    const url = `https://api.frankfurter.app/latest?from=${pair.base}&to=${pair.quote}`;
+    const r = await fetchFollowRedirect(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data && data.rates && data.rates[pair.quote]) {
+      return {
+        price: data.rates[pair.quote],
+        previousClose: null,
+        source: `Frankfurter ECB (SPOT ${pair.base}/${pair.quote})`
+      };
     }
-
-    if (pair.source === 'yahoo') {
-      // Untuk index - pakai Yahoo Finance quote endpoint
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(pair.yahooSymbol)}?interval=1m&range=1d`;
-      const fetchRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!fetchRes.ok) return null;
-      const data = await fetchRes.json();
-      const meta = data.chart && data.chart.result && data.chart.result[0] && data.chart.result[0].meta;
-      if (meta && meta.regularMarketPrice) {
-        return {
-          price: meta.regularMarketPrice,
-          previousClose: meta.chartPreviousClose || meta.previousClose,
-          source: 'yahoo-realtime'
-        };
-      }
-    }
+    return null;
   } catch (err) {
     console.error('Realtime price error:', err.message);
     return null;
   }
-  return null;
 }
 
 // ======================================================
-//  📡 SUMBER DATA FOREX: FAWAZ CURRENCY-API (SPOT)
+//  📡 SUMBER DATA FOREX: FRANKFURTER (ECB) + FAWAZ BACKUP
 // ======================================================
-//  Menggunakan https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api
-//  - SPOT forex (bukan futures, bukan synthetic)
+//  Frankfurter (api.frankfurter.app) - SUMBER RESMI TradingView untuk forex
+//  - Data dari European Central Bank (ECB), bank sentral resmi
 //  - GRATIS, tanpa API key
-//  - Support historical per tanggal (CDN cached)
-//  - Update harian, data lengkap (EUR, GBP, JPY, CHF, AUD, CAD, NZD, XAU, XAG)
-//  - Pakai base = BASE currency, quote = currency yang dibandingkan
+//  - 1 request untuk 30 hari historical (timeseries endpoint)
+//  - Update harian
+//  - Coverage: 30+ mata uang termasuk EUR, GBP, JPY, CHF, AUD, CAD, NZD
+//  - XAU/XAG tidak ada di Frankfurter → fallback ke Fawaz
 //
-//  CATATAN: API ini memberikan rate "1 BASE = ? USD" atau "1 BASE = ? QUOTE"
-//  Jadi untuk pair EUR/USD: ambil 1 EUR = ? USD → langsung dapat harga
-//  Untuk pair USD/JPY: ambil 1 USD = ? JPY → langsung dapat harga
-//  Untuk pair EUR/JPY: perlu cross rate (EUR/USD × USD/JPY)
+//  Fawaz (cdn.jsdelivr.net/@fawazahmed0) sebagai backup:
+//  - Lebih lengkap (XAU, XAG, crypto, dll)
+//  - Spot, no key, update harian
 // ======================================================
 
-// Ambil rate per tanggal dari Fawaz (spot, no key)
-async function getFawazRateAtDate(date, base, quote) {
-  // base/quote lowercase untuk URL
-  const baseLow = base.toLowerCase();
-  const quoteLow = quote.toLowerCase();
-  const dateStr = date.toISOString().split('T')[0];
-  const url = `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateStr}/v1/currencies/${baseLow}.json`;
+// Helper: fetch dengan auto-follow redirect
+async function fetchFollowRedirect(url, headers = {}) {
+  return new Promise((resolve) => {
+    const doFetch = (u) => {
+      const lib = u.startsWith('https') ? require('https') : require('http');
+      lib.get(u, { headers: { 'User-Agent': 'Mozilla/5.0', ...headers } }, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          const newUrl = res.headers.location.startsWith('http') ? res.headers.location : new URL(res.headers.location, u).href;
+          return doFetch(newUrl);
+        }
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => resolve({ ok: res.statusCode === 200, status: res.statusCode, json: () => Promise.resolve(safeJson(data)) }));
+      }).on('error', e => resolve({ ok: false, status: 0, error: e.message }));
+    };
+    doFetch(url);
+  });
+}
+
+function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
+
+// Ambil data historis forex dari FRANKFURTER (ECB) - SATU-SATUNYA SUMBER
+// European Central Bank reference rates (ECB)
+// SUMBER RESMI TradingView untuk forex D1 historical
+// Gratis, tanpa API key, tanpa registrasi
+// Update harian
+async function getFrankfurterRates(base, quote) {
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 60);
+    const fmt = d => d.toISOString().split('T')[0];
+    const url = `https://api.frankfurter.app/${fmt(startDate)}..${fmt(endDate)}?from=${base}&to=${quote}`;
+    const r = await fetchFollowRedirect(url);
     if (!r.ok) return null;
     const data = await r.json();
-    return data[baseLow] && data[baseLow][quoteLow] ? data[baseLow][quoteLow] : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Ambil data historis 30 hari dari Fawaz (spot forex, no key)
-async function getFrankfurterRates(base, quote) {
-  const prices = [];
-  const endDate = new Date();
-  // Ambil 30 hari ke belakang (skip weekend mungkin tidak ada data)
-  for (let i = 30; i >= 0; i--) {
-    const d = new Date(endDate);
-    d.setDate(endDate.getDate() - i);
-    const rate = await getFawazRateAtDate(d, base, quote);
-    if (rate !== null) prices.push(rate);
-    // Small delay supaya tidak kena rate limit CDN
-    await new Promise(r => setTimeout(r, 100));
-  }
-  return prices.length >= 20 ? prices : null;
-}
-
-// Ambil data historis 30 hari dari Yahoo Finance (gratis, tanpa API key)
-// Pakai endpoint chart publik: https://query1.finance.yahoo.com/v8/finance/chart/<SYMBOL>
-async function getYahooRates(yahooSymbol) {
-  const endTimestamp = Math.floor(Date.now() / 1000);
-  const startTimestamp = endTimestamp - (60 * 24 * 60 * 60); // 60 hari
-
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?period1=${startTimestamp}&period2=${endTimestamp}&interval=1d`;
-
-  try {
-    const fetchRes = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
-    const data = await fetchRes.json();
-    const result = data.chart && data.chart.result && data.chart.result[0];
-    if (!result || !result.indicators || !result.indicators.adjclose) {
-      throw new Error('No data');
+    if (data && data.rates) {
+      const prices = Object.keys(data.rates).sort().map(date => data.rates[date][quote]).filter(v => v !== undefined);
+      if (prices.length >= 20) {
+        console.log(`✓ ${base}/${quote} from Frankfurter ECB: ${prices.length} days`);
+        return prices;
+      }
     }
-    // adjclose[0].adjclose = array harga
-    const prices = result.indicators.adjclose[0].adjclose.filter(p => p !== null);
-    return prices.length > 0 ? prices : null;
-  } catch (err) {
-    console.error('Error fetching Yahoo data:', err.message);
+    return null;
+  } catch (e) {
+    console.error(`Frankfurter error for ${base}/${quote}:`, e.message);
     return null;
   }
 }
 
-// Dispatch ke source yang sesuai (frankfurter atau yahoo)
+// Dispatch ke Frankfurter (satu-satunya sumber)
 async function getHistoricalRates(pair) {
-  if (pair.source === 'yahoo') {
-    return getYahooRates(pair.yahooSymbol);
-  }
   return getFrankfurterRates(pair.base, pair.quote);
 }
 
@@ -822,32 +801,18 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   }
 
   // === AMBIL DATA UNTUK ANALISA UTAMA ===
-  // Strategi TANPA YAHOO (per request user):
-  // - SEMUA pair: pakai D1 SPOT dari Fawaz (sudah dari prices = D1 historical)
-  //   - Forex: langsung dari Fawaz (D1 spot)
-  //   - XAUUSD: D1 spot dari Fawaz XAU/USD
-  //   - NASDAQ/SPX/DJI: D1 spot dari Yahoo (satu-satunya free source untuk indeks)
-  //     Catatan: Indeks tidak ada di Fawaz, hanya Yahoo yang kasih gratis
-  // - MTF (multi-timeframe) dari Yahoo hanya untuk NASDAQ/SPX/DJI (index)
-  //   Pair forex & XAUUSD TIDAK pakai Yahoo (sesuai request)
+  // Sumber: HANYA FRANKFURTER (ECB) - tidak ada Yahoo, tidak ada Fawaz
+  // Semua pair forex dari ECB (European Central Bank)
+  // - Pair Yahoo sudah dihapus dari SUPPORTED_PAIRS
+  // - XAU/XAG tidak ada di Frankfurter - sudah dihapus dari SUPPORTED_PAIRS
+  // - Indeks saham tidak ada di Frankfurter - sudah dihapus dari SUPPORTED_PAIRS
   let mtf = null;
   let primaryTimeframe = 'D1';
-  let analysisPrices = prices; // default D1
+  let analysisPrices = prices; // D1 dari Frankfurter
 
-  // Hanya indeks yang boleh pakai Yahoo (karena tidak ada sumber SPOT gratis lain)
-  if (pair.source === 'yahoo' && pair.yahooSymbol && ['NASDAQ', 'SPX', 'DJI'].includes(pair.symbol)) {
-    try {
-      const tfMod = require('./timeframe');
-      mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
-      console.log(`✓ MTF loaded for index ${pair.symbol} (Yahoo) - analisa utama tetap D1`);
-    } catch (err) {
-      console.error('MTF fetch error:', err.message);
-    }
-  } else {
-    console.log(`✓ D1 SPOT bias for ${pair.symbol} (dari Fawaz, tanpa Yahoo)`);
-  }
+  console.log(`✓ D1 SPOT bias for ${pair.symbol} (dari Frankfurter ECB)`);
 
-  // Generate analisa dari D1 (analysisPrices = prices dari getHistoricalRates = D1)
+  // Generate analisa dari D1
   const analysis = generateSignal(analysisPrices);
   analysis.primaryTimeframe = primaryTimeframe;
   analysis.h1Available = false;
