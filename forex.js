@@ -822,39 +822,35 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   }
 
   // === AMBIL DATA UNTUK ANALISA UTAMA ===
-  // Strategi terbaru (agar akurat seperti TradingView):
-  // - Pair Yahoo (XAUUSD, NASDAQ, SPX, DJI): pakai H1 dari Yahoo sebagai primary
-  //   (karena Yahoo D1 untuk GC=F = futures, bukan spot. H1 lebih representatif)
-  // - Pair forex: pakai D1 dari Fawaz (sudah spot, akurat)
-  // - MTF tetap dipakai untuk konfirmasi tren di TF lain
+  // Strategi TANPA YAHOO (per request user):
+  // - SEMUA pair: pakai D1 SPOT dari Fawaz (sudah dari prices = D1 historical)
+  //   - Forex: langsung dari Fawaz (D1 spot)
+  //   - XAUUSD: D1 spot dari Fawaz XAU/USD
+  //   - NASDAQ/SPX/DJI: D1 spot dari Yahoo (satu-satunya free source untuk indeks)
+  //     Catatan: Indeks tidak ada di Fawaz, hanya Yahoo yang kasih gratis
+  // - MTF (multi-timeframe) dari Yahoo hanya untuk NASDAQ/SPX/DJI (index)
+  //   Pair forex & XAUUSD TIDAK pakai Yahoo (sesuai request)
   let mtf = null;
   let primaryTimeframe = 'D1';
   let analysisPrices = prices; // default D1
 
-  if (pair.source === 'yahoo' && pair.yahooSymbol) {
+  // Hanya indeks yang boleh pakai Yahoo (karena tidak ada sumber SPOT gratis lain)
+  if (pair.source === 'yahoo' && pair.yahooSymbol && ['NASDAQ', 'SPX', 'DJI'].includes(pair.symbol)) {
     try {
       const tfMod = require('./timeframe');
       mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
-
-      // Ambil data H1 untuk analisa utama (lebih akurat dari D1 futures)
-      if (mtf && mtf.analysis && mtf.analysis.H1 && mtf.analysis.H1.prices && mtf.analysis.H1.prices.length >= 21) {
-        analysisPrices = mtf.analysis.H1.prices;
-        primaryTimeframe = 'H1';
-        console.log(`✓ H1 bias for ${pair.symbol}: ${analysisPrices.length} bars (MTF D1/H4/H1/M30/M15 dimuat)`);
-      } else {
-        console.log(`⚠ H1 not available for ${pair.symbol}, pakai D1 (Yahoo)`);
-      }
+      console.log(`✓ MTF loaded for index ${pair.symbol} (Yahoo) - analisa utama tetap D1`);
     } catch (err) {
       console.error('MTF fetch error:', err.message);
     }
   } else {
-    console.log(`✓ D1 bias for ${pair.symbol} (forex dari Fawaz spot)`);
+    console.log(`✓ D1 SPOT bias for ${pair.symbol} (dari Fawaz, tanpa Yahoo)`);
   }
 
-  // Generate analisa dari H1 (jika Yahoo) atau D1 (jika forex)
+  // Generate analisa dari D1 (analysisPrices = prices dari getHistoricalRates = D1)
   const analysis = generateSignal(analysisPrices);
   analysis.primaryTimeframe = primaryTimeframe;
-  analysis.h1Available = primaryTimeframe === 'H1';
+  analysis.h1Available = false;
 
   // === AMBIL HARGA REAL-TIME (untuk akurasi) ===
   // Historical price dipakai untuk analisa, real-time price untuk display
