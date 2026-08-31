@@ -249,6 +249,12 @@ function calculateRSI(prices, period = 14) {
 }
 
 // Tentukan signal berdasarkan SMA & RSI
+// ATURAN:
+// 1. RSI extremes (overbought/oversold) = signal Kuat
+// 2. SMA7 vs SMA21 (crossover) = signal Sedang
+// 3. Posisi harga vs SMA7 = konfirmasi (bullish jika di atas, bearish jika di bawah)
+// 4. Jika SMA7 > SMA21 tapi harga di bawah SMA7 = konfirmasi lemah (retracement)
+// 5. Jika SMA7 < SMA21 tapi harga di atas SMA7 = rebound (signal tidak valid)
 function generateSignal(prices) {
   const sma7 = calculateSMA(prices, 7);   // short-term
   const sma21 = calculateSMA(prices, 21); // long-term
@@ -259,7 +265,11 @@ function generateSignal(prices) {
   let strength = 'Lemah';
   let reason = [];
 
-  // Cek RSI dulu (overbought/oversold)
+  // === STEP 1: Cek posisi harga vs SMA (paling penting untuk akurasi) ===
+  const priceAboveSma7 = currentPrice > sma7;
+  const priceAboveSma21 = currentPrice > sma21;
+
+  // === STEP 2: Cek RSI extremes dulu (overbought/oversold) ===
   if (rsi > 70) {
     signal = 'SELL';
     strength = 'Kuat';
@@ -270,22 +280,52 @@ function generateSignal(prices) {
     reason.push(`RSI ${rsi.toFixed(1)} (oversold)`);
   }
 
-  // Cek crossover SMA
+  // === STEP 3: Cek SMA crossover + konfirmasi posisi harga ===
   if (sma7 > sma21) {
-    if (signal !== 'SELL') {
-      signal = 'BUY';
-      reason.push(`SMA7 > SMA21 (bullish)`);
-    } else {
-      reason.push(`SMA7 > SMA21 (konflik dgn RSI)`);
-      strength = 'Sedang';
+    // SMA7 > SMA21 = uptrend dominan
+    if (priceAboveSma7 && priceAboveSma21) {
+      // Konfirmasi penuh: harga di atas kedua SMA
+      if (signal !== 'SELL') {
+        signal = 'BUY';
+        strength = signal === 'NETRAL' ? 'Kuat' : strength; // upgrade strength
+        reason.push(`SMA7 > SMA21 + harga di atas SMA7/SMA21 (bullish kuat)`);
+      } else {
+        reason.push(`SMA7 > SMA21 (konflik dgn RSI overbought)`);
+        strength = 'Sedang';
+      }
+    } else if (!priceAboveSma7) {
+      // SMA7 > SMA21 tapi harga di bawah SMA7 = PULLBACK/RETRACEMENT
+      // Ini SELL signal (tren masih up tapi harga koreksi dulu)
+      if (signal === 'NETRAL') {
+        signal = 'SELL';
+        strength = 'Sedang';
+        reason.push(`Pullback: SMA7 > SMA21 tapi harga di bawah SMA7 (koreksi)`);
+      } else {
+        reason.push(`SMA7 > SMA21 tapi harga pullback ke bawah SMA7`);
+      }
     }
   } else if (sma7 < sma21) {
-    if (signal !== 'BUY') {
-      signal = 'SELL';
-      reason.push(`SMA7 < SMA21 (bearish)`);
-    } else {
-      reason.push(`SMA7 < SMA21 (konflik dgn RSI)`);
-      strength = 'Sedang';
+    // SMA7 < SMA21 = downtrend dominan
+    if (!priceAboveSma7 && !priceAboveSma21) {
+      // Konfirmasi penuh: harga di bawah kedua SMA
+      if (signal !== 'BUY') {
+        signal = 'SELL';
+        strength = signal === 'NETRAL' ? 'Kuat' : strength;
+        reason.push(`SMA7 < SMA21 + harga di bawah SMA7/SMA21 (bearish kuat)`);
+      } else {
+        reason.push(`SMA7 < SMA21 (konflik dgn RSI oversold)`);
+        strength = 'Sedang';
+      }
+    } else if (priceAboveSma7) {
+      // SMA7 < SMA21 tapi harga rebound di atas = BOUNCE
+      // Ini BUY signal (rebound di tengah downtrend)
+      if (signal === 'NETRAL') {
+        signal = 'BUY';
+        strength = 'Lemah';
+        reason.push(`Bounce: SMA7 < SMA21 tapi harga rebound di atas SMA7`);
+      } else {
+        reason.push(`SMA7 < SMA21 tapi harga rebound di atas SMA7`);
+      }
     }
   }
 
@@ -440,22 +480,28 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
       };
     }
   } else if (signal === 'SELL') {
+    // Untuk SELL: entry ideal di atas harga (resistance area / upper fib)
     let entryPrice = currentPrice;
     if (m5Zones) {
+      // Untuk SELL, ideal entry di upper fib 50% (retracement up sebelum turun)
       const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
-      if (idealFib) entryPrice = parseFloat(idealFib.price);
+      if (idealFib) {
+        const fibPrice = parseFloat(idealFib.price);
+        // Hanya pakai kalau fib di atas current price (retracement ke atas)
+        if (fibPrice > currentPrice) entryPrice = fibPrice;
+      }
     }
 
-    // SL 50 pips dari entry price
+    // SL 50 pips di atas entry price (karena SELL)
     const slPrice = entryPrice + slDistance;
-    // TP R:R 1:2 = 100 pips dari entry
+    // TP R:R 1:2 = 100 pips di bawah entry
     const tp1Price = entryPrice - tp1Distance;
 
     zones = {
       entry: {
         ideal: entryPrice.toFixed(decimals),
-        aggressive: (currentPrice * 0.9995).toFixed(decimals),
-        conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 1.001).toFixed(decimals)
+        aggressive: (currentPrice * 0.9995).toFixed(decimals),  // langsung di market
+        conservative: m5Zones ? m5Zones.fibEntries[0].price : (currentPrice * 1.001).toFixed(decimals)  // pullback ke atas
       },
       stopLoss: slPrice.toFixed(decimals),
       stopLossPips: SL_PIPS,
@@ -481,7 +527,8 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
 }
 
 // Hitung Probability Score (0-100%)
-function calculateProbability(analysis, fundamental, regime, volatility, m5Confirmation = null) {
+// mtf = { confluence: { bias, score, aligned, total }, analysis: {...} }
+function calculateProbability(analysis, fundamental, regime, volatility, m5Confirmation = null, mtf = null) {
   let score = 50; // baseline
 
   // 1. RSI contribution (max ±15)
@@ -495,10 +542,14 @@ function calculateProbability(analysis, fundamental, regime, volatility, m5Confi
     score -= 3;
   }
 
-  // 2. SMA alignment (max ±10)
+  // 2. SMA alignment (max ±10) - hanya valid jika posisi harga konfirm
   const smaDiff = ((analysis.sma7 - analysis.sma21) / analysis.sma21) * 100;
   if (Math.abs(smaDiff) > 0.5) {
-    score += (analysis.signal === 'BUY' ? 10 : -10) * Math.sign(smaDiff) * Math.sign(analysis.signal === 'BUY' ? 1 : -1);
+    const priceAboveSma7 = analysis.currentPrice > analysis.sma7;
+    if (analysis.signal === 'BUY' && smaDiff > 0 && priceAboveSma7) score += 10;
+    else if (analysis.signal === 'SELL' && smaDiff < 0 && !priceAboveSma7) score += 10;
+    else if (analysis.signal === 'BUY' && smaDiff < 0) score -= 5; // sinyal vs SMA beda
+    else if (analysis.signal === 'SELL' && smaDiff > 0) score -= 5;
   }
 
   // 3. Trend alignment (max ±10)
@@ -528,6 +579,23 @@ function calculateProbability(analysis, fundamental, regime, volatility, m5Confi
     // M5 RSI extreme untuk validasi
     if (m5Confirmation.m5RSI > 70 || m5Confirmation.m5RSI < 30) {
       score += 3; // M5 juga overbought/oversold, tambah keyakinan
+    }
+  }
+
+  // 7. MTF CONFLUENCE (max ±20) - BOBOT TERBESAR, sinyal harus searah mayoritas TF
+  if (mtf && mtf.confluence) {
+    const c = mtf.confluence;
+    const expectedBias = analysis.signal === 'BUY' ? 'BULLISH' : analysis.signal === 'SELL' ? 'BEARISH' : 'NEUTRAL';
+    if (c.bias === expectedBias && expectedBias !== 'NEUTRAL') {
+      // Signal searah MTF
+      if (c.score >= 80) score += 20;      // 4-5 TF searah = signal sangat kuat
+      else if (c.score >= 60) score += 12; // 3 TF searah
+      else if (c.score >= 40) score += 5;  // 2 TF searah
+    } else if (c.bias !== 'NEUTRAL' && expectedBias !== 'NEUTRAL' && c.bias !== expectedBias) {
+      // Signal BERTENTANGAN dengan MTF → penalty BESAR
+      if (c.score >= 80) score -= 25;      // 4-5 TF berlawanan = jangan entry
+      else if (c.score >= 60) score -= 18; // 3 TF berlawanan
+      else if (c.score >= 40) score -= 10; // 2 TF berlawanan
     }
   }
 
@@ -826,8 +894,8 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
   const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
 
-  // Hitung probability dengan M5 confirmation
-  let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility, m5Confirmation);
+  // Hitung probability dengan M5 confirmation + MTF confluence
+  let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility, m5Confirmation, mtf);
 
   if (mtf && mtf.confluence && mtf.confluence.score >= 80) {
     // MTF confluence tinggi → probability bonus
