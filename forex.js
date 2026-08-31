@@ -236,7 +236,8 @@ function calculateATR(prices, period = 14) {
 
 // Hitung Zone Entry, Stop Loss, Take Profit (3 level)
 // Mendukung mode scalping/intraday/swing
-function calculateZones(signal, currentPrice, atr, mode = 'intraday') {
+// Untuk scalping: gunakan M5 high/low sebagai referensi zona entry presisi
+function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = null) {
   // Default: pakai 1x ATR untuk SL, 2x ATR untuk TP1
   if (!atr) {
     // Fallback: pakai 0.3% dari harga
@@ -256,15 +257,66 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday') {
   const rr2 = (tp2Distance / slDistance).toFixed(1);
   const rr3 = (tp3Distance / slDistance).toFixed(1);
 
+  // === UNTUK SCALPING: Tambahkan zona M5 spesifik ===
+  let m5Zones = null;
+  if (mode === 'scalping' && m5Data && m5Data.prices && m5Data.prices.length >= 20) {
+    // Hitung high/low M5 terakhir (10-20 bar terakhir)
+    const recentM5 = m5Data.prices.slice(-30);
+    const m5High = Math.max(...recentM5);
+    const m5Low = Math.min(...recentM5);
+    const m5Pivot = (m5High + m5Low + recentM5[recentM5.length - 1]) / 3;
+
+    // M5 Support/Resistance
+    const m5Resistance1 = m5High;
+    const m5Support1 = m5Low;
+
+    // M5 Entry zones (berdasarkan Fibonacci retracement dari range M5)
+    const fibLevels = [0.382, 0.5, 0.618]; // Golden ratio untuk entry presisi
+    m5Zones = {
+      high: m5High,
+      low: m5Low,
+      pivot: m5Pivot,
+      resistance1: m5Resistance1,
+      support1: m5Support1,
+      fibEntries: fibLevels.map(fib => {
+        // Untuk BUY, entry di retracement down
+        // Untuk SELL, entry di retracement up
+        if (signal === 'BUY') {
+          return {
+            level: (fib * 100).toFixed(1) + '%',
+            price: (m5High - (m5High - m5Low) * fib).toFixed(decimals),
+            note: 'Buy di pullback'
+          };
+        } else {
+          return {
+            level: (fib * 100).toFixed(1) + '%',
+            price: (m5Low + (m5High - m5Low) * fib).toFixed(decimals),
+            note: 'Sell di retracement'
+          };
+        }
+      })
+    };
+  }
+
   let zones = {};
   if (signal === 'BUY') {
+    // Untuk scalping: entry ideal di M5 support/fib
+    let idealEntry = currentPrice.toFixed(decimals);
+    if (m5Zones) {
+      // Ambil fib 50% sebagai entry ideal (mid-range pullback)
+      const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
+      if (idealFib) idealEntry = idealFib.price;
+    }
+
     zones = {
       entry: {
-        ideal: currentPrice.toFixed(decimals),
-        aggressive: (currentPrice * 1.001).toFixed(decimals),
-        conservative: (currentPrice * 0.999).toFixed(decimals)
+        ideal: idealEntry,
+        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market
+        conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 0.999).toFixed(decimals)  // pullback dalam
       },
-      stopLoss: (currentPrice - slDistance).toFixed(decimals),
+      stopLoss: m5Zones
+        ? Math.min(currentPrice - slDistance, m5Zones.low - (atr * 0.5)).toFixed(decimals)  // SL di bawah M5 low
+        : (currentPrice - slDistance).toFixed(decimals),
       stopLossPips: slDistance,
       takeProfit: [
         { level: 'TP1', price: (currentPrice + tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
@@ -272,14 +324,33 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday') {
         { level: 'TP3', price: (currentPrice + tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
       ]
     };
+
+    // Tambahkan M5 reference zones
+    if (m5Zones) {
+      zones.m5Reference = {
+        m5High: m5Zones.high.toFixed(decimals),
+        m5Low: m5Zones.low.toFixed(decimals),
+        m5Pivot: m5Zones.pivot.toFixed(decimals),
+        fibEntries: m5Zones.fibEntries,
+        note: 'Entry berdasarkan Fibonacci retracement M5'
+      };
+    }
   } else if (signal === 'SELL') {
+    let idealEntry = currentPrice.toFixed(decimals);
+    if (m5Zones) {
+      const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
+      if (idealFib) idealEntry = idealFib.price;
+    }
+
     zones = {
       entry: {
-        ideal: currentPrice.toFixed(decimals),
-        aggressive: (currentPrice * 0.999).toFixed(decimals),
-        conservative: (currentPrice * 1.001).toFixed(decimals)
+        ideal: idealEntry,
+        aggressive: (currentPrice * 0.9995).toFixed(decimals),
+        conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 1.001).toFixed(decimals)
       },
-      stopLoss: (currentPrice + slDistance).toFixed(decimals),
+      stopLoss: m5Zones
+        ? Math.max(currentPrice + slDistance, m5Zones.high + (atr * 0.5)).toFixed(decimals)
+        : (currentPrice + slDistance).toFixed(decimals),
       stopLossPips: slDistance,
       takeProfit: [
         { level: 'TP1', price: (currentPrice - tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
@@ -287,6 +358,16 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday') {
         { level: 'TP3', price: (currentPrice - tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
       ]
     };
+
+    if (m5Zones) {
+      zones.m5Reference = {
+        m5High: m5Zones.high.toFixed(decimals),
+        m5Low: m5Zones.low.toFixed(decimals),
+        m5Pivot: m5Zones.pivot.toFixed(decimals),
+        fibEntries: m5Zones.fibEntries,
+        note: 'Entry berdasarkan Fibonacci retracement M5'
+      };
+    }
   } else {
     zones = null;
   }
@@ -392,7 +473,7 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   // === ZONE ENTRY / SL / TP ===
   if (zones && analysis.signal !== 'NETRAL') {
     lines.push('🎯 *ZONE TRADING:*');
-    lines.push(`📍 *Entry:*`);
+    lines.push(`📍 *Entry (M5):*`);
     lines.push(`   • Ideal: \`${zones.entry.ideal}\``);
     lines.push(`   • Agresif: \`${zones.entry.aggressive}\``);
     lines.push(`   • Konservatif: \`${zones.entry.conservative}\``);
@@ -402,6 +483,22 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
       lines.push(`   • ${tp.level}: \`${tp.price}\` (R:R ${tp.rr})`);
     });
     lines.push('');
+
+    // === M5 Reference Zones (khusus scalping) ===
+    if (zones.m5Reference) {
+      lines.push('📊 *M5 Reference Zone:*');
+      lines.push(`   • M5 High: \`${zones.m5Reference.m5High}\``);
+      lines.push(`   • M5 Low: \`${zones.m5Reference.m5Low}\``);
+      lines.push(`   • M5 Pivot: \`${zones.m5Reference.m5Pivot}\``);
+      if (zones.m5Reference.fibEntries) {
+        lines.push('   • *Fibonacci Entry Levels:*');
+        zones.m5Reference.fibEntries.forEach(fib => {
+          lines.push(`      - ${fib.level}: \`${fib.price}\` (${fib.note})`);
+        });
+      }
+      lines.push(`   _${zones.m5Reference.note}_`);
+      lines.push('');
+    }
   }
 
   // === INDIKATOR TEKNIKAL ===
@@ -509,9 +606,10 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     }
   }
 
-  // Hitung zones (dengan mode trading)
+  // Hitung zones (dengan mode trading + M5 untuk scalping)
   const atr = calculateATR(prices, 14);
-  const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode);
+  const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
+  const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
 
   // Hitung probability (bonus jika MTF searah)
   let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility);
