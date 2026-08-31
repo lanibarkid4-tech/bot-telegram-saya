@@ -61,36 +61,14 @@ const TRADING_MODES = {
   }
 };
 
-// Daftar pair forex yang didukung dari TWELVE DATA
-// - Forex major + cross pairs (dukungan lengkap dari Twelve Data)
-// - XAU/USD (Gold Spot) - Twelve Data support
-// - Indeks saham (NASDAQ, SPX, DJI) - Twelve Data support
-// Total 20 pair
+// Daftar pair yang didukung - HANYA 2 PAIR
+// 1. XAU/USD (Gold Spot) - dari Twelve Data
+// 2. NASDAQ (US100 Index ETF - QQQ) - dari Twelve Data
 const SUPPORTED_PAIRS = [
-  // Forex major
-  { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'twelvedata' },
-  { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD', source: 'twelvedata' },
-  { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY', source: 'twelvedata' },
-  { symbol: 'USDCHF', base: 'USD', quote: 'CHF', display: 'USD/CHF', source: 'twelvedata' },
-  { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD', source: 'twelvedata' },
-  { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD', source: 'twelvedata' },
-  { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD', source: 'twelvedata' },
-  // Forex cross
-  { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY', source: 'twelvedata' },
-  { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY', source: 'twelvedata' },
-  { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP', source: 'twelvedata' },
-  { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'twelvedata' },
-  { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'twelvedata' },
-  { symbol: 'CADJPY', base: 'CAD', quote: 'JPY', display: 'CAD/JPY', source: 'twelvedata' },
-  { symbol: 'CHFJPY', base: 'CHF', quote: 'JPY', display: 'CHF/JPY', source: 'twelvedata' },
-  { symbol: 'EURAUD', base: 'EUR', quote: 'AUD', display: 'EUR/AUD', source: 'twelvedata' },
-  { symbol: 'GBPAUD', base: 'GBP', quote: 'AUD', display: 'GBP/AUD', source: 'twelvedata' },
-  // Gold Spot XAU/USD (Twelve Data support)
+  // Gold Spot XAU/USD
   { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'twelvedata' },
-  // Indeks saham (Twelve Data support)
-  { symbol: 'NASDAQ', base: 'IXIC', quote: 'USD', display: 'NASDAQ (US100)', source: 'twelvedata' },
-  { symbol: 'SPX',    base: 'GSPC', quote: 'USD', display: 'S&P 500',        source: 'twelvedata' },
-  { symbol: 'DJI',    base: 'DJI',  quote: 'USD', display: 'Dow Jones',       source: 'twelvedata' }
+  // NASDAQ-100 Index (via QQQ ETF proxy)
+  { symbol: 'NASDAQ', base: 'QQQ', quote: 'USD', display: 'NASDAQ (US100)', source: 'twelvedata', twelvedataSymbol: 'QQQ' }
 ];
 
 // Cari object pair dari simbol (case-insensitive, tanpa slash)
@@ -108,7 +86,7 @@ async function getRealtimePrice(pair) {
     return null;
   }
   try {
-    const symbol = toTwelveDataSymbol(pair.base, pair.quote);
+    const symbol = pair.twelvedataSymbol || toTwelveDataSymbol(pair.base, pair.quote);
     const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
     const r = await fetchTwelveData(url);
     if (!r.ok) return null;
@@ -117,7 +95,7 @@ async function getRealtimePrice(pair) {
       return {
         price: parseFloat(data.price),
         previousClose: null,
-        source: `Twelve Data (SPOT ${pair.base}/${pair.quote})`
+        source: `Twelve Data (SPOT ${pair.display})`
       };
     }
     return null;
@@ -173,13 +151,14 @@ function getTwelveDataApiKey() {
 
 // Ambil data historis dari Twelve Data
 // Endpoint: GET /time_series?symbol=EUR/USD&interval=1day&outputsize=30
-async function getTwelveDataHistoricalRates(base, quote, interval = '1day', outputsize = 60) {
+// pair: object pair (bisa punya custom twelvedataSymbol untuk indeks)
+async function getTwelveDataHistoricalRates(base, quote, interval = '1day', outputsize = 60, customSymbol = null) {
   const apiKey = getTwelveDataApiKey();
   if (!apiKey) {
     console.error('❌ TWELVE_DATA_API_KEY belum diset di environment variable');
     return null;
   }
-  const symbol = toTwelveDataSymbol(base, quote);
+  const symbol = customSymbol || toTwelveDataSymbol(base, quote);
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&apikey=${apiKey}`;
   const r = await fetchTwelveData(url);
   if (!r.ok) {
@@ -204,14 +183,16 @@ async function getTwelveDataHistoricalRates(base, quote, interval = '1day', outp
   return null;
 }
 
-// Alias untuk backward compat dengan kode yang panggil getFrankfurterRates
+// Alias untuk backward compat dengan kode yang panggil getFrankfurterRates(pair, pair)
 async function getFrankfurterRates(base, quote) {
   return getTwelveDataHistoricalRates(base, quote, '1day', 60);
 }
 
-// Dispatch ke Frankfurter (satu-satunya sumber)
+// Dispatch ke Twelve Data (satu-satunya sumber)
+// Support pair object dengan custom twelvedataSymbol (untuk indeks)
 async function getHistoricalRates(pair) {
-  return getFrankfurterRates(pair.base, pair.quote);
+  const customSymbol = pair.twelvedataSymbol || null;
+  return getTwelveDataHistoricalRates(pair.base, pair.quote, '1day', 60, customSymbol);
 }
 
 // Hitung Simple Moving Average
