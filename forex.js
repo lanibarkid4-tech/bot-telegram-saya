@@ -2,28 +2,74 @@
 //  📊 MODULE FOREX SIGNAL - GRATIS (Tanpa API Key)
 // ======================================================
 //  Mengambil data historis dari Frankfurter API (ECB)
-//  dan menghasilkan signal trading sederhana berbasis
-//  indikator SMA crossover + RSI.
+//  dan Yahoo Finance (untuk commodity & index).
+//  Signal trading berbasis indikator SMA crossover + RSI.
+//  Support Multi-Timeframe + 3 Mode (Scalping/Swing/Intraday).
 //
 //  PASANG PAIR YANG DIDUKUNG:
-//  EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD,
-//  NZDUSD, EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
+//  Forex  : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD,
+//           NZDUSD, EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
+//  Logam  : XAUUSD (Gold)
+//  Index  : NASDAQ (US100), SPX (S&P 500), DJI (Dow Jones)
 // ======================================================
+
+// ======================================================
+//  🎯 KONFIGURASI MODE TRADING
+// ======================================================
+//  Setiap mode punya setting SL/TP/entry berbeda
+const TRADING_MODES = {
+  scalping: {
+    name: '⚡ SCALPING',
+    description: 'Entry presisi M3/M5, TP kecil, SL ketat. Cocok untuk trading cepat.',
+    slMultiplier: 0.8,    // SL lebih ketat
+    tp1Multiplier: 0.6,   // TP1 dekat
+    tp2Multiplier: 1.2,   // TP2 sedang
+    tp3Multiplier: 1.8,   // TP3 agak jauh
+    timeInTrade: '1-15 menit',
+    bestFor: 'Market tenang/trending, volatilitas rendah-sedang'
+  },
+  intraday: {
+    name: '⏱️ INTRADAY',
+    description: 'Entry di M15-H1, TP sedang, hold dalam hitungan jam. Balance scalping & swing.',
+    slMultiplier: 1.2,
+    tp1Multiplier: 1.0,
+    tp2Multiplier: 1.8,
+    tp3Multiplier: 2.8,
+    timeInTrade: '1-4 jam',
+    bestFor: 'Day trading, market trending jelas'
+  },
+  swing: {
+    name: '🔄 SWING',
+    description: 'Entry di H4-D1, TP besar, hold berhari-hari. Untuk trading santai.',
+    slMultiplier: 2.0,    // SL longgar
+    tp1Multiplier: 1.5,
+    tp2Multiplier: 3.0,
+    tp3Multiplier: 5.0,
+    timeInTrade: '1-7 hari',
+    bestFor: 'Market trending kuat, fundamental jelas'
+  }
+};
 
 // Daftar pair forex yang didukung
 const SUPPORTED_PAIRS = [
-  { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD' },
-  { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD' },
-  { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY' },
-  { symbol: 'USDCHF', base: 'USD', quote: 'CHF', display: 'USD/CHF' },
-  { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD' },
-  { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD' },
-  { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD' },
-  { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY' },
-  { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY' },
-  { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP' },
-  { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY' },
-  { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF' }
+  // Forex
+  { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'frankfurter' },
+  { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD', source: 'frankfurter' },
+  { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY', source: 'frankfurter' },
+  { symbol: 'USDCHF', base: 'USD', quote: 'CHF', display: 'USD/CHF', source: 'frankfurter' },
+  { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD', source: 'frankfurter' },
+  { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD', source: 'frankfurter' },
+  { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD', source: 'frankfurter' },
+  { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY', source: 'frankfurter' },
+  { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY', source: 'frankfurter' },
+  { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP', source: 'frankfurter' },
+  { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'frankfurter' },
+  { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'frankfurter' },
+  // Commodity & Index (via Yahoo Finance)
+  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold)', source: 'yahoo', yahooSymbol: 'GC=F' },
+  { symbol: 'NASDAQ', base: 'IXIC', quote: 'USD', display: 'NASDAQ (US100)', source: 'yahoo', yahooSymbol: '^IXIC' },
+  { symbol: 'SPX',    base: 'GSPC', quote: 'USD', display: 'S&P 500',        source: 'yahoo', yahooSymbol: '^GSPC' },
+  { symbol: 'DJI',    base: 'DJI',  quote: 'USD', display: 'Dow Jones',       source: 'yahoo', yahooSymbol: '^DJI' }
 ];
 
 // Cari object pair dari simbol (case-insensitive, tanpa slash)
@@ -33,11 +79,11 @@ function findPair(symbolInput) {
 }
 
 // Ambil data historis 30 hari dari Frankfurter (gratis, tanpa API key)
-// Frankfurter = European Central Bank reference rates
-async function getHistoricalRates(base, quote) {
+// Frankfurter = European Central Bank reference rates (hanya forex)
+async function getFrankfurterRates(base, quote) {
   const endDate = new Date();
   const startDate = new Date();
-  startDate.setDate(endDate.getDate() - 30);
+  startDate.setDate(endDate.getDate() - 60); // minta 60 hari, dapat sekitar 30 hari trading
 
   const fmt = (d) => d.toISOString().split('T')[0];
   const url = `https://api.frankfurter.app/${fmt(startDate)}..${fmt(endDate)}?from=${base}&to=${quote}`;
@@ -51,6 +97,41 @@ async function getHistoricalRates(base, quote) {
     console.error('Error fetching forex data:', err.message);
     return null;
   }
+}
+
+// Ambil data historis 30 hari dari Yahoo Finance (gratis, tanpa API key)
+// Pakai endpoint chart publik: https://query1.finance.yahoo.com/v8/finance/chart/<SYMBOL>
+async function getYahooRates(yahooSymbol) {
+  const endTimestamp = Math.floor(Date.now() / 1000);
+  const startTimestamp = endTimestamp - (60 * 24 * 60 * 60); // 60 hari
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?period1=${startTimestamp}&period2=${endTimestamp}&interval=1d`;
+
+  try {
+    const fetchRes = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
+    const data = await fetchRes.json();
+    const result = data.chart && data.chart.result && data.chart.result[0];
+    if (!result || !result.indicators || !result.indicators.adjclose) {
+      throw new Error('No data');
+    }
+    // adjclose[0].adjclose = array harga
+    const prices = result.indicators.adjclose[0].adjclose.filter(p => p !== null);
+    return prices.length > 0 ? prices : null;
+  } catch (err) {
+    console.error('Error fetching Yahoo data:', err.message);
+    return null;
+  }
+}
+
+// Dispatch ke source yang sesuai (frankfurter atau yahoo)
+async function getHistoricalRates(pair) {
+  if (pair.source === 'yahoo') {
+    return getYahooRates(pair.yahooSymbol);
+  }
+  return getFrankfurterRates(pair.base, pair.quote);
 }
 
 // Hitung Simple Moving Average
@@ -142,10 +223,124 @@ function generateSignal(prices) {
   };
 }
 
+// Hitung ATR (Average True Range) sederhana - untuk SL/TP
+function calculateATR(prices, period = 14) {
+  if (prices.length < period + 1) return null;
+  const ranges = [];
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const tr = Math.abs(prices[i] - prices[i - 1]);
+    ranges.push(tr);
+  }
+  return ranges.reduce((a, b) => a + b, 0) / ranges.length;
+}
+
+// Hitung Zone Entry, Stop Loss, Take Profit (3 level)
+// Mendukung mode scalping/intraday/swing
+function calculateZones(signal, currentPrice, atr, mode = 'intraday') {
+  // Default: pakai 1x ATR untuk SL, 2x ATR untuk TP1
+  if (!atr) {
+    // Fallback: pakai 0.3% dari harga
+    atr = currentPrice * 0.003;
+  }
+
+  const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
+  const decimals = currentPrice > 100 ? 2 : 5;
+
+  const slDistance = atr * modeConfig.slMultiplier;
+  const tp1Distance = atr * modeConfig.tp1Multiplier;
+  const tp2Distance = atr * modeConfig.tp2Multiplier;
+  const tp3Distance = atr * modeConfig.tp3Multiplier;
+
+  // Hitung Risk:Reward ratio
+  const rr1 = (tp1Distance / slDistance).toFixed(1);
+  const rr2 = (tp2Distance / slDistance).toFixed(1);
+  const rr3 = (tp3Distance / slDistance).toFixed(1);
+
+  let zones = {};
+  if (signal === 'BUY') {
+    zones = {
+      entry: {
+        ideal: currentPrice.toFixed(decimals),
+        aggressive: (currentPrice * 1.001).toFixed(decimals),
+        conservative: (currentPrice * 0.999).toFixed(decimals)
+      },
+      stopLoss: (currentPrice - slDistance).toFixed(decimals),
+      stopLossPips: slDistance,
+      takeProfit: [
+        { level: 'TP1', price: (currentPrice + tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
+        { level: 'TP2', price: (currentPrice + tp2Distance).toFixed(decimals), rr: `1:${rr2}` },
+        { level: 'TP3', price: (currentPrice + tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
+      ]
+    };
+  } else if (signal === 'SELL') {
+    zones = {
+      entry: {
+        ideal: currentPrice.toFixed(decimals),
+        aggressive: (currentPrice * 0.999).toFixed(decimals),
+        conservative: (currentPrice * 1.001).toFixed(decimals)
+      },
+      stopLoss: (currentPrice + slDistance).toFixed(decimals),
+      stopLossPips: slDistance,
+      takeProfit: [
+        { level: 'TP1', price: (currentPrice - tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
+        { level: 'TP2', price: (currentPrice - tp2Distance).toFixed(decimals), rr: `1:${rr2}` },
+        { level: 'TP3', price: (currentPrice - tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
+      ]
+    };
+  } else {
+    zones = null;
+  }
+
+  return zones;
+}
+
+// Hitung Probability Score (0-100%)
+function calculateProbability(analysis, fundamental, regime, volatility) {
+  let score = 50; // baseline
+
+  // 1. RSI contribution (max ±15)
+  if (analysis.rsi > 70 || analysis.rsi < 30) {
+    score += 15; // extreme RSI = strong signal
+  } else if (analysis.rsi > 60 || analysis.rsi < 40) {
+    score += 8;
+  } else if (analysis.rsi > 50 && analysis.rsi < 60) {
+    score += 3; // mildly bullish
+  } else if (analysis.rsi < 50 && analysis.rsi > 40) {
+    score -= 3;
+  }
+
+  // 2. SMA alignment (max ±10)
+  const smaDiff = ((analysis.sma7 - analysis.sma21) / analysis.sma21) * 100;
+  if (Math.abs(smaDiff) > 0.5) {
+    score += (analysis.signal === 'BUY' ? 10 : -10) * Math.sign(smaDiff) * Math.sign(analysis.signal === 'BUY' ? 1 : -1);
+  }
+
+  // 3. Trend alignment (max ±10)
+  if (analysis.signal === 'BUY' && regime === 'TRENDING_UP') score += 10;
+  if (analysis.signal === 'SELL' && regime === 'TRENDING_DOWN') score += 10;
+  if (analysis.signal === 'BUY' && regime === 'TRENDING_DOWN') score -= 8; // sinyal melawan trend
+  if (analysis.signal === 'SELL' && regime === 'TRENDING_UP') score -= 8;
+  if (regime === 'RANGING') score -= 5; // ranging = tidak ada trend
+
+  // 4. Fundamental bias (max ±10)
+  if (analysis.signal === 'BUY' && fundamental.bias === 'BULLISH') score += 10;
+  if (analysis.signal === 'SELL' && fundamental.bias === 'BEARISH') score += 10;
+  if (analysis.signal === 'BUY' && fundamental.bias === 'BEARISH') score -= 7;
+  if (analysis.signal === 'SELL' && fundamental.bias === 'BULLISH') score -= 7;
+
+  // 5. Volatility (max ±5) - volatilitas tinggi = kurang pasti
+  if (volatility.level === 'HIGH') score -= 5;
+  if (volatility.level === 'LOW') score += 3;
+
+  // Clamp 5-95
+  return Math.max(5, Math.min(95, Math.round(score)));
+}
+
 // Format hasil signal jadi pesan Telegram
-function formatSignalMessage(pair, analysis) {
+function formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf) {
   const isJPY = pair.quote === 'JPY';
   const decimalPlaces = isJPY ? 3 : 5;
+  const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
 
   const signalEmoji = {
     'BUY': '🟢',
@@ -153,35 +348,129 @@ function formatSignalMessage(pair, analysis) {
     'NETRAL': '🟡'
   }[analysis.signal];
 
+  // Probability bar visual
+  const filled = Math.round(probability / 10);
+  const empty = 10 - filled;
+  const probBar = '▓'.repeat(filled) + '░'.repeat(empty);
+
+  let probLabel = 'RENDAH';
+  if (probability >= 75) probLabel = 'TINGGI';
+  else if (probability >= 55) probLabel = 'SEDANG';
+
   const lines = [];
-  lines.push(`📊 *SIGNAL FOREX: ${pair.display}*`);
+  lines.push(`📊 *SIGNAL: ${pair.display}*`);
+  lines.push(`🎯 *Mode: ${modeConfig.name}*`);
+  lines.push(`⏰ Hold time: ${modeConfig.timeInTrade}`);
   lines.push('');
   lines.push(`${signalEmoji} *Signal: ${analysis.signal}*`);
-  lines.push(`💪 Kekuatan: ${analysis.strength}`);
+  lines.push(`💪 Kekuatan Teknis: ${analysis.strength}`);
+  lines.push(`🎯 *Probability: ${probability}%* [${probBar}] ${probLabel}`);
   lines.push('');
-  lines.push('💰 *Harga Saat Ini:*');
+
+  // === MTF CONFLUENCE ===
+  if (mtf && mtf.confluence && mtf.confluence.score > 0) {
+    const mtfEmoji = mtf.confluence.score >= 80 ? '🔥' : mtf.confluence.score >= 60 ? '✨' : '⚠️';
+    lines.push(`${mtfEmoji} *MTF Confluence: ${mtf.confluence.score}%* (${mtf.confluence.aligned}/${mtf.confluence.total} TF searah → ${mtf.confluence.bias})`);
+
+    // Tampilkan trend tiap TF
+    const tfLines = [];
+    const tfOrder = ['D1', 'H4', 'H1', 'M30', 'M15'];
+    for (const tf of tfOrder) {
+      const tfData = mtf.analysis[tf];
+      if (tfData && tfData.trend && tfData.trend !== 'UNKNOWN') {
+        const trendEmoji = tfData.trend === 'BULLISH' ? '🟢' : tfData.trend === 'BEARISH' ? '🔴' : '🟡';
+        tfLines.push(`   ${trendEmoji} ${tf}: ${tfData.trend}`);
+      }
+    }
+    if (tfLines.length > 0) {
+      lines.push('*Trend per Timeframe:*');
+      tfLines.forEach(l => lines.push(l));
+    }
+    lines.push('');
+  }
+
+  // === ZONE ENTRY / SL / TP ===
+  if (zones && analysis.signal !== 'NETRAL') {
+    lines.push('🎯 *ZONE TRADING:*');
+    lines.push(`📍 *Entry:*`);
+    lines.push(`   • Ideal: \`${zones.entry.ideal}\``);
+    lines.push(`   • Agresif: \`${zones.entry.aggressive}\``);
+    lines.push(`   • Konservatif: \`${zones.entry.conservative}\``);
+    lines.push(`🛑 *Stop Loss:* \`${zones.stopLoss}\``);
+    lines.push(`🎯 *Take Profit:*`);
+    zones.takeProfit.forEach(tp => {
+      lines.push(`   • ${tp.level}: \`${tp.price}\` (R:R ${tp.rr})`);
+    });
+    lines.push('');
+  }
+
+  // === INDIKATOR TEKNIKAL ===
+  lines.push('💰 *Harga:*');
   lines.push(`\`${analysis.currentPrice.toFixed(decimalPlaces)}\``);
   lines.push('');
-  lines.push('📈 *Indikator:*');
+  lines.push('📈 *Indikator (D1):*');
   lines.push(`• RSI (14): \`${analysis.rsi.toFixed(1)}\``);
   lines.push(`• SMA 7: \`${analysis.sma7.toFixed(decimalPlaces)}\``);
   lines.push(`• SMA 21: \`${analysis.sma21.toFixed(decimalPlaces)}\``);
   lines.push('');
-  lines.push('🎯 *Level Penting:*');
+
+  // === ENTRY TIMING (M3/M5) ===
+  if (mtf && (mtf.entry.M5 || mtf.entry.M3)) {
+    const m5 = mtf.entry.M5;
+    const m3 = mtf.entry.M3;
+    lines.push('⏱️ *Entry Timing:*');
+    if (m5 && m5.bars > 0) {
+      const m5Trend = analyzeTrend(m5.prices);
+      const m5Emoji = m5Trend.trend === 'BULLISH' ? '🟢' : m5Trend.trend === 'BEARISH' ? '🔴' : '🟡';
+      lines.push(`   ${m5Emoji} M5 trend: ${m5Trend.trend} (RSI ${m5Trend.rsi?.toFixed(1)})`);
+    }
+    if (m3 && m3.bars > 0) {
+      const m3Trend = analyzeTrend(m3.prices);
+      const m3Emoji = m3Trend.trend === 'BULLISH' ? '🟢' : m3Trend.trend === 'BEARISH' ? '🔴' : '🟡';
+      lines.push(`   ${m3Emoji} M3 trend: ${m3Trend.trend} (RSI ${m3Trend.rsi?.toFixed(1)})`);
+    }
+    if ((!m5 || m5.bars === 0) && (!m3 || m3.bars === 0)) {
+      lines.push('   ⚠️ Data intraday tidak tersedia (rate limit)');
+      lines.push('   📊 Gunakan chart M3/M5 platform trading Anda');
+    }
+    lines.push('');
+  }
+
+  lines.push('🎯 *Level Support/Resistance:*');
   lines.push(`• Resistance: \`${analysis.resistance.toFixed(decimalPlaces)}\``);
   lines.push(`• Support: \`${analysis.support.toFixed(decimalPlaces)}\``);
   lines.push('');
+
+  // === ANALISA FUNDAMENTAL ===
+  lines.push('📰 *Fundamental:*');
+  lines.push(`• Market Regime: *${fundamental.regime}*`);
+  lines.push(`• Volatilitas: ${fundamental.volatility.level} (${fundamental.volatility.annualized.toFixed(1)}% annualized)`);
+  lines.push(`• Bias Fundamental: *${fundamental.bias}* (${fundamental.fundamentalBias}%)`);
+  if (fundamental.pairStrength.base !== 0 || fundamental.pairStrength.quote !== 0) {
+    lines.push(`• ${pair.base} strength: ${fundamental.pairStrength.base > 0 ? '+' : ''}${fundamental.pairStrength.base.toFixed(2)}%`);
+    if (pair.quote !== 'USD' && pair.quote !== pair.base) {
+      lines.push(`• ${pair.quote} strength: ${fundamental.pairStrength.quote > 0 ? '+' : ''}${fundamental.pairStrength.quote.toFixed(2)}%`);
+    }
+  }
+  lines.push('');
+
+  // === ALASAN TEKNIKAL ===
   lines.push('📝 *Alasan:*');
   analysis.reason.forEach(r => lines.push(`• ${r}`));
   lines.push('');
+
+  lines.push('💡 *Info Mode:*');
+  lines.push(`_${modeConfig.description}_`);
+  lines.push(`_${modeConfig.bestFor}_`);
+  lines.push('');
   lines.push('⚠️ *Disclaimer:*');
-  lines.push('_Signal ini berdasarkan indikator teknikal sederhana (SMA + RSI). Bukan saran finansial. Trading forex memiliki risiko tinggi. Gunakan manajemen risiko yang baik._');
+  lines.push('_Signal ini BUKAN saran finansial. Gunakan manajemen risiko yang baik._');
 
   return lines.join('\n');
 }
 
-// Ambil signal untuk satu pair
-async function getSignalForPair(symbolInput) {
+// Ambil signal untuk satu pair (dengan mode trading)
+async function getSignalForPair(symbolInput, mode = 'intraday') {
   const pair = findPair(symbolInput);
   if (!pair) {
     return {
@@ -190,7 +479,12 @@ async function getSignalForPair(symbolInput) {
     };
   }
 
-  const prices = await getHistoricalRates(pair.base, pair.quote);
+  if (!TRADING_MODES[mode]) {
+    mode = 'intraday';
+  }
+
+  // Ambil data D1 (daily) untuk analisa utama
+  const prices = await getHistoricalRates(pair);
   if (!prices || prices.length < 21) {
     return {
       success: false,
@@ -199,16 +493,53 @@ async function getSignalForPair(symbolInput) {
   }
 
   const analysis = generateSignal(prices);
-  const message = formatSignalMessage(pair, analysis);
+
+  // Import fundamental module
+  const fundamentalMod = require('./fundamental');
+  const fundamental = await fundamentalMod.analyzeFundamental(pair, prices);
+
+  // MTF analysis (hanya untuk pair Yahoo)
+  let mtf = null;
+  if (pair.source === 'yahoo' && pair.yahooSymbol) {
+    try {
+      const tfMod = require('./timeframe');
+      mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
+    } catch (err) {
+      console.error('MTF error:', err.message);
+    }
+  }
+
+  // Hitung zones (dengan mode trading)
+  const atr = calculateATR(prices, 14);
+  const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode);
+
+  // Hitung probability (bonus jika MTF searah)
+  let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility);
+
+  if (mtf && mtf.confluence && mtf.confluence.score >= 80) {
+    // MTF confluence tinggi → probability bonus
+    if ((analysis.signal === 'BUY' && mtf.confluence.bias === 'BULLISH') ||
+        (analysis.signal === 'SELL' && mtf.confluence.bias === 'BEARISH')) {
+      probability = Math.min(95, probability + 10);
+    }
+  } else if (mtf && mtf.confluence && mtf.confluence.score < 50) {
+    // MTF tidak searah → probability penalty
+    if ((analysis.signal === 'BUY' && mtf.confluence.bias === 'BEARISH') ||
+        (analysis.signal === 'SELL' && mtf.confluence.bias === 'BULLISH')) {
+      probability = Math.max(5, probability - 15);
+    }
+  }
+
+  const message = formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf);
   return { success: true, message };
 }
 
 // Ambil signal untuk semua pair
-async function getAllSignals() {
+async function getAllSignals(mode = 'intraday') {
   const results = [];
   for (const pair of SUPPORTED_PAIRS) {
     try {
-      const prices = await getHistoricalRates(pair.base, pair.quote);
+      const prices = await getHistoricalRates(pair);
       if (prices && prices.length >= 21) {
         const analysis = generateSignal(prices);
         results.push({ pair, analysis });

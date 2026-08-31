@@ -205,14 +205,16 @@ bot.onText(/\/quote/, (pesan) => {
 // ======================================================
 
 // /forex atau /signal → signal untuk pair tertentu atau default EURUSD
-bot.onText(/^\/(forex|signal)(\s+(.+))?$/, async (pesan, match) => {
+// Default mode: SCALPING (bisa override: /signal EURUSD swing, dll)
+bot.onText(/^\/(forex|signal)(\s+(\S+))?(\s+(scalping|intraday|swing))?$/i, async (pesan, match) => {
   const chatId = pesan.chat.id;
-  const input = match[3] ? match[3].trim() : 'EURUSD';
+  const input = match[3] ? match[3].trim().toUpperCase() : 'EURUSD';
+  const mode = match[5] ? match[5].toLowerCase() : 'scalping';  // DEFAULT = scalping
 
   // Tampilkan "sedang menganalisa..."
-  const loadingMsg = await bot.sendMessage(chatId, `⏳ Sedang menganalisa ${input.toUpperCase()}...`);
+  const loadingMsg = await bot.sendMessage(chatId, `⚡ Mode ${mode.toUpperCase()} - ${input}\n⏳ Mengambil data + Multi-timeframe analysis...`);
 
-  const result = await forex.getSignalForPair(input);
+  const result = await forex.getSignalForPair(input, mode);
   if (result.success) {
     bot.editMessageText(result.message, {
       chat_id: chatId,
@@ -225,6 +227,55 @@ bot.onText(/^\/(forex|signal)(\s+(.+))?$/, async (pesan, match) => {
       message_id: loadingMsg.message_id
     });
   }
+});
+
+// /scalping, /swing, /intraday → shortcut untuk mode
+bot.onText(/^\/(scalping|swing|intraday)(\s+(\S+))?$/i, async (pesan, match) => {
+  const chatId = pesan.chat.id;
+  const mode = match[1].toLowerCase();
+  const input = match[3] ? match[3].trim().toUpperCase() : 'EURUSD';
+
+  const loadingMsg = await bot.sendMessage(chatId, `⏳ Mode ${mode.toUpperCase()} - Mengambil data ${input}...`);
+
+  const result = await forex.getSignalForPair(input, mode);
+  if (result.success) {
+    bot.editMessageText(result.message, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown'
+    });
+  } else {
+    bot.editMessageText(result.message, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id
+    });
+  }
+});
+
+// /modes → lihat 3 mode trading
+bot.onText(/^\/modes$/, (pesan) => {
+  const chatId = pesan.chat.id;
+  const modes = forex.TRADING_MODES || {};
+  const lines = [
+    '🎯 *3 MODE TRADING*',
+    '',
+  ];
+
+  for (const [key, cfg] of Object.entries(modes)) {
+    lines.push(`${cfg.name}`);
+    lines.push(`_${cfg.description}_`);
+    lines.push(`⏰ ${cfg.timeInTrade}`);
+    lines.push(`📌 ${cfg.bestFor}`);
+    lines.push('');
+  }
+
+  lines.push('*Cara Pakai:*');
+  lines.push('`/scalping EURUSD` - Mode scalping');
+  lines.push('`/intraday GBPJPY` - Mode intraday');
+  lines.push('`/swing XAUUSD` - Mode swing');
+  lines.push('`/signal EURUSD swing` - Dengan mode di argumen');
+
+  bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
 });
 
 // /pairs → daftar semua pair forex yang didukung
@@ -245,12 +296,12 @@ Contoh: \`/signal GBPJPY\`
   bot.sendMessage(chatId, pesanDaftar, { parse_mode: 'Markdown' });
 });
 
-// /signals → ringkasan signal semua pair
+// /signals → ringkasan signal semua pair (default mode scalping)
 bot.onText(/^\/signals$/, async (pesan) => {
   const chatId = pesan.chat.id;
-  const loadingMsg = await bot.sendMessage(chatId, '⏳ Mengambil signal semua pair...');
+  const loadingMsg = await bot.sendMessage(chatId, '⚡ Mode SCALPING\n⏳ Mengambil signal semua pair...');
 
-  const results = await forex.getAllSignals();
+  const results = await forex.getAllSignals('scalping');
   if (!results.length) {
     bot.editMessageText('❌ Gagal mengambil data. Coba lagi nanti.', {
       chat_id: chatId,
@@ -265,15 +316,16 @@ bot.onText(/^\/signals$/, async (pesan) => {
   const netral = results.filter(r => r.analysis.signal === 'NETRAL');
 
   const lines = [];
-  lines.push('📊 *RINGKASAN SIGNAL FOREX*');
+  lines.push('⚡ *RINGKASAN SIGNAL - SCALPING*');
   lines.push(`🕐 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+  lines.push('🎯 *Mode: Scalping (1-15 menit)*');
   lines.push('');
   lines.push('*Ringkasan:*');
   lines.push(`🟢 BUY: ${buy.length} pair`);
   lines.push(`🔴 SELL: ${sell.length} pair`);
   lines.push(`🟡 NETRAL: ${netral.length} pair`);
   lines.push('');
-  lines.push('*Detail:*');
+  lines.push('*Detail (urut prioritas):*');
 
   // Urutkan: BUY dulu, lalu SELL, lalu NETRAL
   const sorted = [...buy, ...sell, ...netral];
