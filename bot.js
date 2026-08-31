@@ -14,6 +14,12 @@ const TelegramBot = require('node-telegram-bot-api');
 // 2️⃣b IMPORT MODULE FOREX (signal trading gratis)
 const forex = require('./forex');
 
+// 2️⃣c IMPORT MODULE ORDERFLOW (XAUUSDT Binance)
+const orderflow = require('./orderflow');
+
+// 2️⃣d IMPORT MODULE LIQUIDATION WATCHER
+const liquidations = require('./liquidations');
+
 // 3️⃣  AMBIL TOKEN DARI FILE .env
 //     Token ini seperti "password" bot Anda. Jangan share ke orang lain!
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -71,6 +77,13 @@ Saya bot yang siap membantu Anda 24 jam.
 /jam   - Lihat jam sekarang
 /quote - Quote motivasi
 
+⚡ ORDERFLOW XAUUSDT (Binance):
+/orderflow - Snapshot lengkap (OB + Delta + CVD + Whale)
+/cvd       - Cumulative Volume Delta 60 menit
+/liquidations - Trade besar futures (indikasi liq)
+/orderbook - Top 20 bids/asks
+/flow      - Taker buy/sell + delta
+
 📊 FOREX SIGNAL (gratis):
 /pairs   - Daftar pair forex
 /signal  - Signal EUR/USD
@@ -103,6 +116,13 @@ Berikut perintah yang bisa Anda gunakan:
 /halo   - Sapa bot
 /info   - Lihat info akun Telegram Anda
 /jam    - Lihat waktu sekarang
+
+⚡ ORDERFLOW XAUUSDT (Binance):
+/orderflow - Snapshot lengkap (OB + Delta + CVD + Whale)
+/cvd       - Cumulative Volume Delta 60 menit
+/liquidations - Trade besar futures (indikasi liq)
+/orderbook - Top 20 bids/asks
+/flow      - Taker buy/sell + delta
 /quote  - Dapatkan kata-kata motivasi
 
 📊 FOREX SIGNAL (gratis):
@@ -386,6 +406,217 @@ bot.on('message', (pesan) => {
   else {
     // Balasan default untuk pesan yang tidak dikenali
     bot.sendMessage(chatId, `Saya menerima pesan Anda: "${pesan.text}"\n\nKetik /help untuk melihat daftar perintah.`);
+  }
+});
+
+// ======================================================
+//  ⚡ PERINTAH ORDERFLOW XAUUSDT - BINANCE
+// ======================================================
+
+// /orderflow → snapshot lengkap (OB + Flow + CVD + Whale)
+bot.onText(/^\/orderflow$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(
+    chatId,
+    '📊 Mengambil orderflow XAUUSDT dari Binance...\n⏳ Orderbook + AggTrades + CVD + OI'
+  );
+  try {
+    const snap = await orderflow.getFullOrderflow('XAUUSDT');
+    const text = orderflow.formatOrderflowMessage(snap);
+    bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+    });
+  } catch (e) {
+    bot.editMessageText(
+      `❌ Gagal mengambil orderflow: ${e.message}\n\n` +
+      `Coba lagi dalam beberapa detik.`,
+      { chat_id: chatId, message_id: loadingMsg.message_id }
+    );
+  }
+});
+
+// /cvd → fokus CVD 60 menit
+bot.onText(/^\/cvd$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '📈 Menghitung CVD 60 menit XAUUSDT...');
+  try {
+    const cvd = await orderflow.getCVD('XAUUSDT', 60);
+    const ticker = await orderflow.get24hTicker('XAUUSDT');
+    const trendEmoji = cvd.trend.includes('BULLISH')
+      ? '📈'
+      : cvd.trend.includes('BEARISH')
+      ? '📉'
+      : '➡️';
+
+    let msg = `${trendEmoji} *CVD XAUUSDT — ${cvd.windowMinutes}min window*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 Last: $${orderflow.fmt(ticker.last)}\n`;
+    msg += `📊 Final CVD: *${orderflow.fmt(cvd.finalCVD, 1)}* XAU\n`;
+    msg += `🎯 Trend: *${cvd.trend}*\n`;
+    msg += `🕐 Buckets (1min): ${cvd.buckets}\n\n`;
+
+    // Tampilkan 10 bucket terakhir
+    const last10 = cvd.series.slice(-10);
+    msg += `*Last 10 menit (delta per bucket):*\n`;
+    for (const b of last10) {
+      const dEmoji = b.delta >= 0 ? '🟢' : '🔴';
+      const time = new Date(b.time).toLocaleTimeString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      msg += `${dEmoji} ${time} → Δ ${b.delta >= 0 ? '+' : ''}${orderflow.fmt(b.delta, 2)} (CVD: ${orderflow.fmt(b.cvd, 1)})\n`;
+    }
+    msg += `\n📌 _CVD naik + harga naik = uptrend sehat. CVD divergence = warning._`;
+
+    bot.editMessageText(msg, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ Error: ${e.message}`, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+    });
+  }
+});
+
+// /orderbook → top 20 bids/asks + imbalance
+bot.onText(/^\/orderbook$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '📚 Mengambil orderbook XAUUSDT...');
+  try {
+    const book = await orderflow.getOrderBook('XAUUSDT', 20);
+    const ticker = await orderflow.get24hTicker('XAUUSDT');
+    let msg = `📚 *ORDER BOOK XAUUSDT (Top 20)*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 Last: $${orderflow.fmt(ticker.last)}\n`;
+    msg += `🟢 Bid: $${orderflow.fmt(book.bestBid)} | 🔴 Ask: $${orderflow.fmt(book.bestAsk)}\n`;
+    msg += `📏 Spread: $${orderflow.fmt(book.spread, 4)} (${orderflow.fmt(book.spreadPct, 4)}%)\n`;
+    msg += `📊 Mid: $${orderflow.fmt(book.midPrice)}\n`;
+    msg += `⚖️ Imbalance: *${orderflow.fmt(book.imbalance, 1)}%* ${book.imbalance > 0 ? '(buyer heavy)' : '(seller heavy)'}\n\n`;
+
+    msg += `*ASKS (sell side):*\n`;
+    book.asks.slice(0, 10).reverse().forEach((a) => {
+      msg += `  $${orderflow.fmt(a.price)} → ${orderflow.fmt(a.qty, 2)} XAU\n`;
+    });
+    msg += `\n*BIDS (buy side):*\n`;
+    book.bids.slice(0, 10).forEach((b) => {
+      msg += `  $${orderflow.fmt(b.price)} → ${orderflow.fmt(b.qty, 2)} XAU\n`;
+    });
+    msg += `\n📌 _Imbalance > +10% = buyer dominan, <-10% = seller dominan._`;
+
+    bot.editMessageText(msg, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ Error: ${e.message}`, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+    });
+  }
+});
+
+// /flow → fokus taker buy/sell delta
+bot.onText(/^\/flow$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '🌊 Menghitung taker flow 500 trades terakhir...');
+  try {
+    const agg = await orderflow.getAggTrades('XAUUSDT', 500);
+    const ticker = await orderflow.get24hTicker('XAUUSDT');
+    const emoji = agg.delta > 0 ? '🟢' : agg.delta < 0 ? '🔴' : '⚪';
+
+    let msg = `${emoji} *TAKER FLOW XAUUSDT (${agg.totalTrades} trades)*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 Last: $${orderflow.fmt(ticker.last)} (${ticker.changePct >= 0 ? '+' : ''}${orderflow.fmt(ticker.changePct, 2)}% 24h)\n\n`;
+    msg += `🟢 *Buy Volume:*  ${orderflow.fmt(agg.buyVol, 1)} XAU ($${orderflow.fmtBig(agg.buyValue)})\n`;
+    msg += `   Trades: ${agg.buyCount}\n\n`;
+    msg += `🔴 *Sell Volume:* ${orderflow.fmt(agg.sellVol, 1)} XAU ($${orderflow.fmtBig(agg.sellValue)})\n`;
+    msg += `   Trades: ${agg.sellCount}\n\n`;
+    msg += `⚡ *DELTA:* *${agg.delta >= 0 ? '+' : ''}${orderflow.fmt(agg.delta, 1)}* XAU\n`;
+    msg += `📊 Buy: *${orderflow.fmt(agg.buyPct, 1)}%* | Sell: *${orderflow.fmt(agg.sellPct, 1)}%*\n\n`;
+
+    // Deteksi whale
+    const whales = orderflow.detectWhales(agg.trades, 50000);
+    if (whales.length > 0) {
+      msg += `🐋 *WHALE TRADES (≥$50K):*\n`;
+      for (const w of whales.slice(0, 5)) {
+        msg += `   ${w.side} $${orderflow.fmtBig(w.value)} @ $${orderflow.fmt(w.price)}\n`;
+      }
+    } else {
+      msg += `_Tidak ada whale trades terdeteksi._`;
+    }
+
+    msg += `\n📌 _Delta+ & harga+ = trend sehat. Delta-/harga+ = divergence (warning)._`;
+
+    bot.editMessageText(msg, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ Error: ${e.message}`, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+    });
+  }
+});
+
+// /liquidations → trade besar futures XAUUSDT
+bot.onText(/^\/liquidations$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '⚡ Scan liquidations XAUUSDT Futures...');
+  try {
+    const liqs = await liquidations.getRecentLiquidations(100);
+    const msg = liquidations.formatLiquidationsList(liqs);
+    bot.editMessageText(msg, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+    });
+  } catch (e) {
+    bot.editMessageText(`❌ Error: ${e.message}`, {
+      chat_id: chatId,
+      message_id: loadingMsg.message_id,
+    });
+  }
+});
+
+// /alert on|off → enable/disable liquidation alert ke chat ini
+const alertSubscribers = new Set();
+bot.onText(/^\/alert\s+(on|off)$/i, (pesan, match) => {
+  const chatId = pesan.chat.id;
+  const state = match[1].toLowerCase();
+  if (state === 'on') {
+    alertSubscribers.add(chatId);
+    bot.sendMessage(
+      chatId,
+      '🔔 *Liquidation alert AKTIF*\n\nAnda akan menerima notifikasi setiap ada spike trade besar (≥$' +
+        orderflow.fmtBig(liquidations.SPIKE_THRESHOLD_USD) +
+        ') di XAUUSDT Futures.\n\nMatikan dengan: `/alert off`',
+      { parse_mode: 'Markdown' }
+    );
+  } else {
+    alertSubscribers.delete(chatId);
+    bot.sendMessage(chatId, '🔕 Liquidation alert dimatikan.');
+  }
+});
+
+// ======================================================
+//  🔥 START LIQUIDATION WATCHER (WebSocket auto-alert)
+// ======================================================
+liquidations.connectLiquidationStream((trade) => {
+  const alertText = liquidations.formatLiquidationAlert(trade);
+  console.log('[alert]', alertText.replace(/\n/g, ' | '));
+  for (const chatId of alertSubscribers) {
+    bot.sendMessage(chatId, alertText, { parse_mode: 'Markdown' }).catch((e) => {
+      console.error('Failed send alert to', chatId, e.message);
+    });
   }
 });
 

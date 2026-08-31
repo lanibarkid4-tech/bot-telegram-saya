@@ -13,6 +13,9 @@
 //  Index  : NASDAQ (US100), SPX (S&P 500), DJI (Dow Jones)
 // ======================================================
 
+// Import helper untuk analisa trend (untuk entry timing M3/M5)
+const { analyzeTrend } = require('./timeframe');
+
 // ======================================================
 //  🎯 KONFIGURASI MODE TRADING
 // ======================================================
@@ -325,24 +328,25 @@ function calculateATR(prices, period = 14) {
 // Mendukung mode scalping/intraday/swing
 // Untuk scalping: gunakan M5 high/low sebagai referensi zona entry presisi
 function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = null) {
-  // Default: pakai 1x ATR untuk SL, 2x ATR untuk TP1
-  if (!atr) {
-    // Fallback: pakai 0.3% dari harga
-    atr = currentPrice * 0.003;
-  }
+  // === KONFIGURASI SL/TP BARU ===
+  // SL: 50 pips dari zona entry
+  // TP: Risk:Reward 1:2 (TP = 2x SL)
+  const SL_PIPS = 50; // 50 pips
+
+  // Tentukan pip value (1 pip = 0.0001 untuk forex, 0.01 untuk JPY & XAUUSD)
+  const isJPYorGold = currentPrice > 100; // JPY pairs & XAUUSD pakai 2 desimal
+  const pipValue = isJPYorGold ? 0.01 : 0.0001;
+
+  // SL distance = 50 pips
+  const slDistance = SL_PIPS * pipValue;
+  // TP dengan R:R 1:2 → TP = 2x SL = 100 pips
+  const tp1Distance = slDistance * 2.0;  // R:R 1:2
 
   const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
   const decimals = currentPrice > 100 ? 2 : 5;
 
-  const slDistance = atr * modeConfig.slMultiplier;
-  const tp1Distance = atr * modeConfig.tp1Multiplier;
-  const tp2Distance = atr * modeConfig.tp2Multiplier;
-  const tp3Distance = atr * modeConfig.tp3Multiplier;
-
-  // Hitung Risk:Reward ratio
+  // Hitung Risk:Reward ratio (harus 1:2)
   const rr1 = (tp1Distance / slDistance).toFixed(1);
-  const rr2 = (tp2Distance / slDistance).toFixed(1);
-  const rr3 = (tp3Distance / slDistance).toFixed(1);
 
   // === UNTUK SCALPING: Tambahkan zona M5 spesifik ===
   let m5Zones = null;
@@ -388,27 +392,28 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
   let zones = {};
   if (signal === 'BUY') {
     // Untuk scalping: entry ideal di M5 support/fib
-    let idealEntry = currentPrice.toFixed(decimals);
+    let entryPrice = currentPrice;
     if (m5Zones) {
       // Ambil fib 50% sebagai entry ideal (mid-range pullback)
       const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
-      if (idealFib) idealEntry = idealFib.price;
+      if (idealFib) entryPrice = parseFloat(idealFib.price);
     }
+
+    // SL 50 pips dari entry price
+    const slPrice = entryPrice - slDistance;
+    // TP R:R 1:2 = 100 pips dari entry
+    const tp1Price = entryPrice + tp1Distance;
 
     zones = {
       entry: {
-        ideal: idealEntry,
+        ideal: entryPrice.toFixed(decimals),
         aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market
         conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 0.999).toFixed(decimals)  // pullback dalam
       },
-      stopLoss: m5Zones
-        ? Math.min(currentPrice - slDistance, m5Zones.low - (atr * 0.5)).toFixed(decimals)  // SL di bawah M5 low
-        : (currentPrice - slDistance).toFixed(decimals),
-      stopLossPips: slDistance,
+      stopLoss: slPrice.toFixed(decimals),
+      stopLossPips: SL_PIPS,
       takeProfit: [
-        { level: 'TP1', price: (currentPrice + tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
-        { level: 'TP2', price: (currentPrice + tp2Distance).toFixed(decimals), rr: `1:${rr2}` },
-        { level: 'TP3', price: (currentPrice + tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}` }
       ]
     };
 
@@ -423,26 +428,27 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
       };
     }
   } else if (signal === 'SELL') {
-    let idealEntry = currentPrice.toFixed(decimals);
+    let entryPrice = currentPrice;
     if (m5Zones) {
       const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
-      if (idealFib) idealEntry = idealFib.price;
+      if (idealFib) entryPrice = parseFloat(idealFib.price);
     }
+
+    // SL 50 pips dari entry price
+    const slPrice = entryPrice + slDistance;
+    // TP R:R 1:2 = 100 pips dari entry
+    const tp1Price = entryPrice - tp1Distance;
 
     zones = {
       entry: {
-        ideal: idealEntry,
+        ideal: entryPrice.toFixed(decimals),
         aggressive: (currentPrice * 0.9995).toFixed(decimals),
         conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 1.001).toFixed(decimals)
       },
-      stopLoss: m5Zones
-        ? Math.max(currentPrice + slDistance, m5Zones.high + (atr * 0.5)).toFixed(decimals)
-        : (currentPrice + slDistance).toFixed(decimals),
-      stopLossPips: slDistance,
+      stopLoss: slPrice.toFixed(decimals),
+      stopLossPips: SL_PIPS,
       takeProfit: [
-        { level: 'TP1', price: (currentPrice - tp1Distance).toFixed(decimals), rr: `1:${rr1}` },
-        { level: 'TP2', price: (currentPrice - tp2Distance).toFixed(decimals), rr: `1:${rr2}` },
-        { level: 'TP3', price: (currentPrice - tp3Distance).toFixed(decimals), rr: `1:${rr3}` }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}` }
       ]
     };
 
@@ -580,12 +586,12 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
 
   // === ZONE ENTRY / SL / TP ===
   if (zones && analysis.signal !== 'NETRAL') {
-    lines.push('🎯 *ZONE TRADING:*');
-    lines.push(`📍 *Entry (M5):*`);
+    lines.push('🎯 *ZONE TRADING (SL 50 pips, TP R:R 1:2):*');
+    lines.push(`📍 *Entry:*`);
     lines.push(`   • Ideal: \`${zones.entry.ideal}\``);
     lines.push(`   • Agresif: \`${zones.entry.aggressive}\``);
     lines.push(`   • Konservatif: \`${zones.entry.conservative}\``);
-    lines.push(`🛑 *Stop Loss:* \`${zones.stopLoss}\``);
+    lines.push(`🛑 *Stop Loss:* \`${zones.stopLoss}\` (50 pips dari entry)`);
     lines.push(`🎯 *Take Profit:*`);
     zones.takeProfit.forEach(tp => {
       lines.push(`   • ${tp.level}: \`${tp.price}\` (R:R ${tp.rr})`);
@@ -735,10 +741,11 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     };
   }
 
-  // === AMBIL DATA H1 DARI YAHOO UNTUK ANALISA UTAMA ===
-  // Untuk pair Yahoo, pakai data H1 (bukan D1) sebagai basis analisa
-  // Untuk pair forex, tetap pakai D1 dari Frankfurter (H1 forex gratis sulit)
-  let h1Prices = null;
+  // === AMBIL DATA D1 UNTUK ANALISA UTAMA (BIAS D1) ===
+  // Strategi: analisa utama selalu pakai D1 (daily timeframe)
+  // - Pair Yahoo: ambil D1 dari Yahoo (30 hari terakhir)
+  // - Pair forex: sudah dari Frankfurter (D1)
+  // - MTF tetap dipakai untuk konfirmasi tren di TF lain (H4, H1, M30, M15, M5)
   let mtf = null;
   let primaryTimeframe = 'D1';
 
@@ -746,24 +753,17 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     try {
       const tfMod = require('./timeframe');
       mtf = await tfMod.analyzeMTF(pair.yahooSymbol);
-
-      // Ambil data H1 untuk analisa utama
-      if (mtf && mtf.analysis && mtf.analysis.H1 && mtf.analysis.H1.bars > 20) {
-        // Re-fetch data H1 mentah untuk generateSignal
-        const h1Fetch = await tfMod.fetchYahooInterval(pair.yahooSymbol, '1h', '30d');
-        if (h1Fetch.success && h1Fetch.prices && h1Fetch.prices.length >= 21) {
-          h1Prices = h1Fetch.prices;
-          primaryTimeframe = 'H1';
-        }
-      }
+      // Pakai D1 sebagai primary bias, MTF hanya untuk konfirmasi
+      console.log(`✓ D1 bias for ${pair.symbol}, MTF analysis loaded`);
     } catch (err) {
-      console.error('H1 fetch error:', err.message);
+      console.error('MTF fetch error:', err.message);
     }
   }
 
-  // Generate analisa dari H1 (jika ada), fallback ke D1
-  const analysis = h1Prices ? generateSignal(h1Prices) : generateSignal(prices);
+  // Generate analisa dari D1 (prices dari parameter = D1 historical)
+  const analysis = generateSignal(prices);
   analysis.primaryTimeframe = primaryTimeframe;
+  analysis.h1Available = false;
 
   // === AMBIL HARGA REAL-TIME (untuk akurasi) ===
   // Historical price dipakai untuk analisa, real-time price untuk display
@@ -780,44 +780,37 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     console.error('Realtime fetch error:', err.message);
   }
 
-  // Import fundamental module - dengan data H1 jika ada
+  // Import fundamental module - dengan data D1
   const fundamentalMod = require('./fundamental');
-  const fundamental = await fundamentalMod.analyzeFundamental(pair, h1Prices || prices);
+  const fundamental = await fundamentalMod.analyzeFundamental(pair, prices);
 
   // === M5 KONFIRMASI UNTUK ENTRY ===
-  // Cek apakah M5 mengkonfirmasi signal dari H1/D1
+  // Cek apakah M5 mengkonfirmasi signal dari D1
   let m5Confirmation = null;
   if (mtf && mtf.entry && mtf.entry.M5 && mtf.entry.M5.prices && mtf.entry.M5.prices.length >= 14) {
     const m5Signal = generateSignal(mtf.entry.M5.prices);
     const m5Trend = m5Signal.signal;
-    const h1Trend = analysis.signal;
+    const d1Trend = analysis.signal;
 
     // Hitung apakah M5 konfirmasi atau kontradiksi
     let confirmStatus = 'NONE';
-    if (m5Trend === h1Trend && h1Trend !== 'NETRAL') {
-      confirmStatus = 'CONFIRM'; // M5 searah dengan H1
-    } else if (m5Trend !== h1Trend && m5Trend !== 'NETRAL' && h1Trend !== 'NETRAL') {
-      confirmStatus = 'CONFLICT'; // M5 berlawanan dengan H1
+    if (m5Trend === d1Trend && d1Trend !== 'NETRAL') {
+      confirmStatus = 'CONFIRM'; // M5 searah dengan D1
+    } else if (m5Trend !== d1Trend && m5Trend !== 'NETRAL' && d1Trend !== 'NETRAL') {
+      confirmStatus = 'CONFLICT'; // M5 berlawanan dengan D1
     }
 
     m5Confirmation = {
       m5Trend,
-      h1Trend,
+      h1Trend: d1Trend,  // keep field name for display compat
       m5RSI: m5Signal.rsi,
       m5Signal,
       status: confirmStatus
     };
-
-    // Bonus/penalty probability berdasarkan M5 confirmation
-    if (confirmStatus === 'CONFIRM') {
-      // M5 konfirmasi → tambah probability
-    } else if (confirmStatus === 'CONFLICT') {
-      // M5 kontradiksi → kurangi probability
-    }
   }
 
   // Hitung zones (dengan mode trading + M5 untuk scalping) - pakai REAL-TIME price
-  const atr = calculateATR(h1Prices || prices, 14);
+  const atr = calculateATR(prices, 14);
   const m5Data = mtf && mtf.entry && mtf.entry.M5 ? mtf.entry.M5 : null;
   const zones = calculateZones(analysis.signal, analysis.currentPrice, atr, mode, m5Data);
 

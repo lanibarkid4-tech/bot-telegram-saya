@@ -37,12 +37,12 @@ function fetchJson(url, headers = {}, redirectCount = 0) {
   });
 }
 
-// Hitung kekuatan mata uang berdasarkan perubahan 7 hari
-// Mengambil data EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, NZDUSD, USDCHF
-// lalu menghitung USD strength dari inverse beberapa pair
-async function getCurrencyStrength() {
+// Hitung kekuatan mata uang berdasarkan perubahan D1 (14 hari terakhir)
+// Frankfurter hanya kasih D1 - kita pakai window 14 hari supaya representatif
+// untuk analisa fundamental D1 (lebih stabil dari 5 hari / 24 jam)
+async function getCurrencyStrength(pair = null) {
   try {
-    // Frankfurter timeseries 7 hari
+    // Frankfurter timeseries 14 hari (representasi perubahan D1)
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - 14);

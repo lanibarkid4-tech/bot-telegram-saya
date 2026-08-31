@@ -27,8 +27,8 @@ const TIMEFRAMES = {
   M3:  { interval: '1m',  range: '2d',   label: '3 Min (proxy 1m)' }
 };
 
-// Fetch data dari Yahoo Finance untuk satu timeframe
-function fetchYahooInterval(yahooSymbol, interval, range) {
+// Fetch data dari Yahoo Finance untuk satu timeframe dengan retry
+async function fetchYahooInterval(yahooSymbol, interval, range, retries = 2) {
   const endTimestamp = Math.floor(Date.now() / 1000);
   // Range days sebelum now (sedikit buffer)
   const rangeSeconds = {
@@ -44,28 +44,52 @@ function fetchYahooInterval(yahooSymbol, interval, range) {
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?period1=${startTimestamp}&period2=${endTimestamp}&interval=${interval}`;
 
-  return new Promise((resolve) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          const result = json.chart && json.chart.result && json.chart.result[0];
-          if (!result || !result.indicators || !result.indicators.adjclose) {
-            resolve({ success: false, prices: null, error: 'No data' });
-            return;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const result = await new Promise((resolve) => {
+      const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 429) {
+              resolve({ success: false, prices: null, error: 'Rate limit' });
+              return;
+            }
+            const json = JSON.parse(data);
+            const r = json.chart && json.chart.result && json.chart.result[0];
+            if (!r || !r.indicators) {
+              resolve({ success: false, prices: null, error: 'No data' });
+              return;
+            }
+            // Yahoo kadang return 'quote' (close), kadang 'adjclose'
+            let prices = null;
+            if (r.indicators.adjclose && r.indicators.adjclose[0] && r.indicators.adjclose[0].adjclose) {
+              prices = r.indicators.adjclose[0].adjclose.filter(p => p !== null);
+            } else if (r.indicators.quote && r.indicators.quote[0] && r.indicators.quote[0].close) {
+              prices = r.indicators.quote[0].close.filter(p => p !== null);
+            }
+            if (!prices || prices.length === 0) {
+              resolve({ success: false, prices: null, error: 'Empty data' });
+              return;
+            }
+            resolve({ success: true, prices, count: prices.length });
+          } catch (e) {
+            resolve({ success: false, prices: null, error: 'Parse error' });
           }
-          const prices = result.indicators.adjclose[0].adjclose.filter(p => p !== null);
-          resolve({ success: true, prices, count: prices.length });
-        } catch (e) {
-          resolve({ success: false, prices: null, error: 'Parse error' });
-        }
+        });
       });
+      req.on('error', () => resolve({ success: false, prices: null, error: 'Network' }));
+      req.setTimeout(10000, () => { req.destroy(); resolve({ success: false, prices: null, error: 'Timeout' }); });
     });
-    req.on('error', () => resolve({ success: false, prices: null, error: 'Network' }));
-    req.setTimeout(10000, () => { req.destroy(); resolve({ success: false, prices: null, error: 'Timeout' }); });
-  });
+
+    if (result.success) return result;
+    if (attempt < retries) {
+      // Tunggu sebelum retry (rate limit butuh jeda)
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    } else {
+      return result;
+    }
+  }
 }
 
 // Re-sample hourly data ke 4H
@@ -159,12 +183,12 @@ async function analyzeMTF(yahooSymbol) {
     const fetch = await fetchYahooInterval(yahooSymbol, config.interval, config.range);
 
     if (!fetch.success) {
-      result.analysis[tf] = { error: fetch.error, trend: 'UNKNOWN', label: config.label };
+      result.analysis[tf] = { error: fetch.error, trend: 'UNKNOWN', label: config.label, bars: 0, prices: null };
     } else {
       let prices = fetch.prices;
       if (tf === 'H4') prices = resampleTo4H(prices);
       const trend = analyzeTrend(prices);
-      result.analysis[tf] = { ...trend, label: config.label, bars: prices.length };
+      result.analysis[tf] = { ...trend, label: config.label, bars: prices.length, prices: prices };
     }
     await sleep(200);
   }
