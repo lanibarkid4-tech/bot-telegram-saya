@@ -82,35 +82,32 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
-// Ambil harga REAL-TIME
-// - Forex: exchangerate.host
-// - Gold (XAUUSD): gold-api.com (SPOT price, bukan futures!)
+// Ambil harga REAL-TIME dari Fawaz (SPOT, no key)
+// - Forex & XAUUSD: Fawaz currency-api
 // - Index: Yahoo Finance quote endpoint
 async function getRealtimePrice(pair) {
   try {
-    // KHUSUS XAUUSD: pakai gold-api.com untuk SPOT price (bukan futures)
-    if (pair.symbol === 'XAUUSD') {
-      const url = 'https://api.gold-api.com/price/XAU';
-      const fetchRes = await fetch(url);
+    // KHUSUS XAUUSD & semua pair forex/non-yahoo: pakai Fawaz (SPOT)
+    if (pair.source !== 'yahoo' || pair.symbol === 'XAUUSD') {
+      // Tentukan base & quote yang dipakai di Fawaz
+      let base, quote;
+      if (pair.symbol === 'XAUUSD') {
+        base = 'XAU'; quote = 'USD';
+      } else {
+        base = pair.base; quote = pair.quote;
+      }
+      const baseLow = base.toLowerCase();
+      const quoteLow = quote.toLowerCase();
+      const url = `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${baseLow}.json`;
+      const fetchRes = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       if (!fetchRes.ok) return null;
       const data = await fetchRes.json();
-      if (data && data.price) {
+      if (data[baseLow] && data[baseLow][quoteLow]) {
         return {
-          price: data.price,
+          price: data[baseLow][quoteLow],
           previousClose: null,
-          source: 'gold-api.com (SPOT)',
-          updatedAt: data.updatedAt
+          source: `fawazahmed0 (SPOT ${base}/${quote})`
         };
-      }
-      // Fallback ke Yahoo futures kalau gold-api gagal
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent('GC=F')}?interval=1m&range=1d`;
-      const yahooRes = await fetch(yahooUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (yahooRes.ok) {
-        const yahooData = await yahooRes.json();
-        const meta = yahooData.chart?.result?.[0]?.meta;
-        if (meta?.regularMarketPrice) {
-          return { price: meta.regularMarketPrice, source: 'yahoo-futures-fallback', previousClose: meta.chartPreviousClose };
-        }
       }
       return null;
     }
@@ -129,19 +126,6 @@ async function getRealtimePrice(pair) {
           source: 'yahoo-realtime'
         };
       }
-    } else {
-      // Untuk forex - pakai exchangerate.host
-      const url = `https://api.exchangerate.host/latest?base=${pair.base}&symbols=${pair.quote}`;
-      const fetchRes = await fetch(url);
-      if (!fetchRes.ok) return null;
-      const data = await fetchRes.json();
-      if (data.rates && data.rates[pair.quote]) {
-        return {
-          price: data.rates[pair.quote],
-          previousClose: null,
-          source: 'exchangerate.host'
-        };
-      }
     }
   } catch (err) {
     console.error('Realtime price error:', err.message);
@@ -150,25 +134,53 @@ async function getRealtimePrice(pair) {
   return null;
 }
 
-// Ambil data historis 30 hari dari Frankfurter (gratis, tanpa API key)
-// Frankfurter = European Central Bank reference rates (hanya forex)
-async function getFrankfurterRates(base, quote) {
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(endDate.getDate() - 60); // minta 60 hari, dapat sekitar 30 hari trading
+// ======================================================
+//  📡 SUMBER DATA FOREX: FAWAZ CURRENCY-API (SPOT)
+// ======================================================
+//  Menggunakan https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api
+//  - SPOT forex (bukan futures, bukan synthetic)
+//  - GRATIS, tanpa API key
+//  - Support historical per tanggal (CDN cached)
+//  - Update harian, data lengkap (EUR, GBP, JPY, CHF, AUD, CAD, NZD, XAU, XAG)
+//  - Pakai base = BASE currency, quote = currency yang dibandingkan
+//
+//  CATATAN: API ini memberikan rate "1 BASE = ? USD" atau "1 BASE = ? QUOTE"
+//  Jadi untuk pair EUR/USD: ambil 1 EUR = ? USD → langsung dapat harga
+//  Untuk pair USD/JPY: ambil 1 USD = ? JPY → langsung dapat harga
+//  Untuk pair EUR/JPY: perlu cross rate (EUR/USD × USD/JPY)
+// ======================================================
 
-  const fmt = (d) => d.toISOString().split('T')[0];
-  const url = `https://api.frankfurter.app/${fmt(startDate)}..${fmt(endDate)}?from=${base}&to=${quote}`;
-
+// Ambil rate per tanggal dari Fawaz (spot, no key)
+async function getFawazRateAtDate(date, base, quote) {
+  // base/quote lowercase untuk URL
+  const baseLow = base.toLowerCase();
+  const quoteLow = quote.toLowerCase();
+  const dateStr = date.toISOString().split('T')[0];
+  const url = `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateStr}/v1/currencies/${baseLow}.json`;
   try {
-    const fetchRes = await fetch(url);
-    if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
-    const data = await fetchRes.json();
-    return data.rates ? Object.values(data.rates).map(r => r[quote]) : null;
-  } catch (err) {
-    console.error('Error fetching forex data:', err.message);
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data[baseLow] && data[baseLow][quoteLow] ? data[baseLow][quoteLow] : null;
+  } catch (e) {
     return null;
   }
+}
+
+// Ambil data historis 30 hari dari Fawaz (spot forex, no key)
+async function getFrankfurterRates(base, quote) {
+  const prices = [];
+  const endDate = new Date();
+  // Ambil 30 hari ke belakang (skip weekend mungkin tidak ada data)
+  for (let i = 30; i >= 0; i--) {
+    const d = new Date(endDate);
+    d.setDate(endDate.getDate() - i);
+    const rate = await getFawazRateAtDate(d, base, quote);
+    if (rate !== null) prices.push(rate);
+    // Small delay supaya tidak kena rate limit CDN
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return prices.length >= 20 ? prices : null;
 }
 
 // Ambil data historis 30 hari dari Yahoo Finance (gratis, tanpa API key)
