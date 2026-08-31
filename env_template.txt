@@ -8,13 +8,11 @@
 
 ----------------------------------------
 TELEGRAM_BOT_TOKEN=paste_token_anda_disini
-OANDA_API_KEY=paste_oanda_token_disini
-OANDA_ACCOUNT_ID=paste_account_id_disini
+TWELVE_DATA_API_KEY=paste_twelve_data_key_disini
 ----------------------------------------
 
 Ganti "paste_token_anda_disini" dengan token dari BotFather.
-Ganti "paste_oanda_token_disini" dengan OANDA API token.
-Ganti "paste_account_id_disini" dengan OANDA Account ID (numeric).
+Ganti "paste_twelve_data_key_disini" dengan API key dari Twelve Data.
 
 LANGKAH MEMBUAT TELEGRAM TOKEN:
 1. Buka Telegram
@@ -24,16 +22,16 @@ LANGKAH MEMBUAT TELEGRAM TOKEN:
 5. Copy token yang diberikan
 6. Paste di file .env
 
-LANGKAH MEMBUAT OANDA API KEY:
-1. Daftar akun OANDA (demo gratis): https://www.oanda.com/register/
-2. Login → https://www.oanda.com/account/tpa/personal_token
-3. Klik "Generate Personal Access Token"
-4. Copy token (contoh: 0123456789abcdef...)
-5. Catat juga Account ID (numeric, contoh: 001-001-1234567-001)
-6. Paste di file .env
+LANGKAH MEMBUAT TWELVE DATA API KEY (10 DETIK):
+1. Buka https://twelvedata.com/pricing
+2. Sign up dengan email
+3. Verifikasi email
+4. Copy API key dari dashboard
+5. Paste di file .env
 
-CATATAN:
-- Akun OANDA DEMO (practice) GRATIS, tidak perlu deposit
-- OANDA butuh akun broker (tidak ada tier gratis untuk non-customer)
-- Pair OANDA format: EUR_USD (underscore)
-- XAU/USD gold spot juga tersedia di OANDA
+CATATAN TWELVE DATA:
+- GRATIS 800 request/hari, 8 req/menit
+- Support forex, gold (XAU/USD), indeks (IXIC, GSPC, DJI)
+- Pair format: EUR/USD (slash), XAU/USD (gold), IXIC (NASDAQ)
+- Demo key (key=demo) bisa untuk forex testing
+- Untuk gold & indeks butuh sign up

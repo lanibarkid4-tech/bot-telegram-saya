@@ -1,19 +1,19 @@
 // ======================================================
-//  📊 MODULE FOREX SIGNAL - OANDA API
+//  📊 MODULE FOREX SIGNAL - TWELVE DATA API
 // ======================================================
-//  Sumber data: OANDA v20 REST API
-//  - Real-time & historical forex data (D, H4, H1, M30, M15, M5, M1)
-//  - Support forex pairs (EURUSD, GBPUSD, dll) + XAU/USD (Gold Spot)
-//  - GRATIS untuk OANDA customer (perlu API key)
+//  Sumber data: Twelve Data (https://twelvedata.com)
+//  - Real-time & historical data (1min, 5min, 15min, 1h, 4h, 1day)
+//  - Support forex + XAU/USD (Gold) + indeks saham (IXIC, GSPC, DJI)
+//  - GRATIS dengan API key (800 request/hari, 8 req/menit)
 //
-//  CARA SETUP OANDA API KEY:
-//  1. Daftar akun OANDA: https://www.oanda.com/register/
-//  2. Login → Manage API Access
-//  3. Generate Personal Access Token
-//  4. Set environment variable OANDA_API_KEY di Railway
-//  5. (Opsional) Set OANDA_ACCOUNT_ID jika bukan default
+//  CARA SETUP (10 DETIK):
+//  1. Buka https://twelvedata.com/pricing
+//  2. Sign up (email only)
+//  3. Verifikasi email
+//  4. Copy API key dari dashboard
+//  5. Set environment variable TWELVE_DATA_API_KEY
 //
-//  PAIR YANG DIDUKUNG:
+//  PAIR YANG DIDUKUNG (20 total):
 //  Major : EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, USDCAD, NZDUSD
 //  Cross : EURJPY, GBPJPY, EURGBP, AUDJPY, EURCHF
 //  Exotic: EURSEK, EURNOK, EURPLN, EURTRY, EURHUF, EURCZK,
@@ -61,48 +61,36 @@ const TRADING_MODES = {
   }
 };
 
-// Daftar pair forex yang didukung
-// - 30 pair FOREX dari FRANKFURTER (ECB) - sumber resmi TradingView, gratis, no key
-// - XAUUSD (Gold Spot) dari FAWAZ - satu-satunya sumber gold spot gratis tanpa API key
-//   (Frankfurter/ECB tidak ada XAU, semua API gold berbayar butuh key)
-//   TIDAK ADA YAHOO sama sekali
-//   Indeks saham TIDAK ADA (NASDAQ, SPX, DJI dihapus)
+// Daftar pair forex yang didukung dari TWELVE DATA
+// - Forex major + cross pairs (dukungan lengkap dari Twelve Data)
+// - XAU/USD (Gold Spot) - Twelve Data support
+// - Indeks saham (NASDAQ, SPX, DJI) - Twelve Data support
+// Total 20 pair
 const SUPPORTED_PAIRS = [
-  // Forex utama
-  { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'frankfurter' },
-  { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD', source: 'frankfurter' },
-  { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY', source: 'frankfurter' },
-  { symbol: 'USDCHF', base: 'USD', quote: 'CHF', display: 'USD/CHF', source: 'frankfurter' },
-  { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD', source: 'frankfurter' },
-  { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD', source: 'frankfurter' },
-  { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD', source: 'frankfurter' },
-  // Cross pairs
-  { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY', source: 'frankfurter' },
-  { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY', source: 'frankfurter' },
-  { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP', source: 'frankfurter' },
-  { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'frankfurter' },
-  { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'frankfurter' },
-  // Exotic pairs (Frankfurter support)
-  { symbol: 'EURSEK', base: 'EUR', quote: 'SEK', display: 'EUR/SEK', source: 'frankfurter' },
-  { symbol: 'EURNOK', base: 'EUR', quote: 'NOK', display: 'EUR/NOK', source: 'frankfurter' },
-  { symbol: 'EURPLN', base: 'EUR', quote: 'PLN', display: 'EUR/PLN', source: 'frankfurter' },
-  { symbol: 'EURTRY', base: 'EUR', quote: 'TRY', display: 'EUR/TRY', source: 'frankfurter' },
-  { symbol: 'EURHUF', base: 'EUR', quote: 'HUF', display: 'EUR/HUF', source: 'frankfurter' },
-  { symbol: 'EURCZK', base: 'EUR', quote: 'CZK', display: 'EUR/CZK', source: 'frankfurter' },
-  { symbol: 'EURCNY', base: 'EUR', quote: 'CNY', display: 'EUR/CNY', source: 'frankfurter' },
-  { symbol: 'EURINR', base: 'EUR', quote: 'INR', display: 'EUR/INR', source: 'frankfurter' },
-  { symbol: 'USDMXN', base: 'USD', quote: 'MXN', display: 'USD/MXN', source: 'frankfurter' },
-  { symbol: 'USDSGD', base: 'USD', quote: 'SGD', display: 'USD/SGD', source: 'frankfurter' },
-  { symbol: 'USDHKD', base: 'USD', quote: 'HKD', display: 'USD/HKD', source: 'frankfurter' },
-  { symbol: 'USDZAR', base: 'USD', quote: 'ZAR', display: 'USD/ZAR', source: 'frankfurter' },
-  { symbol: 'USDKRW', base: 'USD', quote: 'KRW', display: 'USD/KRW', source: 'frankfurter' },
-  { symbol: 'USDTHB', base: 'USD', quote: 'THB', display: 'USD/THB', source: 'frankfurter' },
-  { symbol: 'USDIDR', base: 'USD', quote: 'IDR', display: 'USD/IDR', source: 'frankfurter' },
-  { symbol: 'USDPHP', base: 'USD', quote: 'PHP', display: 'USD/PHP', source: 'frankfurter' },
-  { symbol: 'USDMYR', base: 'USD', quote: 'MYR', display: 'USD/MYR', source: 'frankfurter' },
-  { symbol: 'USDBRL', base: 'USD', quote: 'BRL', display: 'USD/BRL', source: 'frankfurter' },
-  // Gold Spot XAU/USD - sumber FAWAZ (satu-satunya free tanpa key, tanpa Yahoo)
-  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'fawaz' }
+  // Forex major
+  { symbol: 'EURUSD', base: 'EUR', quote: 'USD', display: 'EUR/USD', source: 'twelvedata' },
+  { symbol: 'GBPUSD', base: 'GBP', quote: 'USD', display: 'GBP/USD', source: 'twelvedata' },
+  { symbol: 'USDJPY', base: 'USD', quote: 'JPY', display: 'USD/JPY', source: 'twelvedata' },
+  { symbol: 'USDCHF', base: 'USD', quote: 'CHF', display: 'USD/CHF', source: 'twelvedata' },
+  { symbol: 'AUDUSD', base: 'AUD', quote: 'USD', display: 'AUD/USD', source: 'twelvedata' },
+  { symbol: 'USDCAD', base: 'USD', quote: 'CAD', display: 'USD/CAD', source: 'twelvedata' },
+  { symbol: 'NZDUSD', base: 'NZD', quote: 'USD', display: 'NZD/USD', source: 'twelvedata' },
+  // Forex cross
+  { symbol: 'EURJPY', base: 'EUR', quote: 'JPY', display: 'EUR/JPY', source: 'twelvedata' },
+  { symbol: 'GBPJPY', base: 'GBP', quote: 'JPY', display: 'GBP/JPY', source: 'twelvedata' },
+  { symbol: 'EURGBP', base: 'EUR', quote: 'GBP', display: 'EUR/GBP', source: 'twelvedata' },
+  { symbol: 'AUDJPY', base: 'AUD', quote: 'JPY', display: 'AUD/JPY', source: 'twelvedata' },
+  { symbol: 'EURCHF', base: 'EUR', quote: 'CHF', display: 'EUR/CHF', source: 'twelvedata' },
+  { symbol: 'CADJPY', base: 'CAD', quote: 'JPY', display: 'CAD/JPY', source: 'twelvedata' },
+  { symbol: 'CHFJPY', base: 'CHF', quote: 'JPY', display: 'CHF/JPY', source: 'twelvedata' },
+  { symbol: 'EURAUD', base: 'EUR', quote: 'AUD', display: 'EUR/AUD', source: 'twelvedata' },
+  { symbol: 'GBPAUD', base: 'GBP', quote: 'AUD', display: 'GBP/AUD', source: 'twelvedata' },
+  // Gold Spot XAU/USD (Twelve Data support)
+  { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', display: 'XAU/USD (Gold Spot)', source: 'twelvedata' },
+  // Indeks saham (Twelve Data support)
+  { symbol: 'NASDAQ', base: 'IXIC', quote: 'USD', display: 'NASDAQ (US100)', source: 'twelvedata' },
+  { symbol: 'SPX',    base: 'GSPC', quote: 'USD', display: 'S&P 500',        source: 'twelvedata' },
+  { symbol: 'DJI',    base: 'DJI',  quote: 'USD', display: 'Dow Jones',       source: 'twelvedata' }
 ];
 
 // Cari object pair dari simbol (case-insensitive, tanpa slash)
@@ -111,59 +99,55 @@ function findPair(symbolInput) {
   return SUPPORTED_PAIRS.find(p => p.symbol === normalized);
 }
 
-// Ambil harga REAL-TIME dari OANDA API
-// Endpoint: GET /v3/accounts/{accountID}/pricing
-// Untuk simplicity, pakai pricing endpoint: /v3/instruments/{symbol}/candles?count=1
+// Ambil harga REAL-TIME dari TWELVE DATA
+// Endpoint: GET /price?symbol=EUR/USD
 async function getRealtimePrice(pair) {
-  const apiKey = getOandaApiKey();
+  const apiKey = getTwelveDataApiKey();
   if (!apiKey) {
-    console.error('❌ OANDA_API_KEY belum diset');
+    console.error('❌ TWELVE_DATA_API_KEY belum diset');
     return null;
   }
   try {
-    const symbol = toOandaSymbol(pair.base, pair.quote);
-    // Ambil candle terakhir (granularity M1, count=1) untuk real-time price
-    const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=M1&count=1&price=MBA`;
-    const r = await fetchOanda(url, { 'Authorization': `Bearer ${apiKey}` });
+    const symbol = toTwelveDataSymbol(pair.base, pair.quote);
+    const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
+    const r = await fetchTwelveData(url);
     if (!r.ok) return null;
     const data = await r.json();
-    if (!data || !data.candles || data.candles.length === 0) return null;
-    const last = data.candles[data.candles.length - 1];
-    if (last && last.mid && last.mid.c) {
+    if (data && data.price) {
       return {
-        price: parseFloat(last.mid.c),
+        price: parseFloat(data.price),
         previousClose: null,
-        source: `OANDA API (SPOT ${pair.base}/${pair.quote})`
+        source: `Twelve Data (SPOT ${pair.base}/${pair.quote})`
       };
     }
     return null;
   } catch (err) {
-    console.error('Realtime OANDA error:', err.message);
+    console.error('Realtime Twelve Data error:', err.message);
     return null;
   }
 }
 
 // ======================================================
-//  📡 SUMBER DATA FOREX: OANDA API (PRIMARY)
+//  📡 SUMBER DATA: TWELVE DATA API
 // ======================================================
-//  OANDA v20 REST API - data forex dari broker OANDA
-//  - Real-time & historical data (granularity: D/H4/H1/M30/M15/M5/M1)
-//  - Mendukung forex pairs (EURUSD, GBPUSD, dll) + XAU/USD (Gold Spot)
-//  - GRATIS untuk OANDA customer (perlu API key dari dashboard OANDA)
-//  - Tidak ada tier gratis untuk non-customer (perlu akun broker)
+//  Twelve Data (https://twelvedata.com) - data forex/commodity/indeks
+//  - Real-time & historical data (1min, 5min, 15min, 30min, 1h, 4h, 1day, dll)
+//  - Support forex pairs (EURUSD, GBPUSD, dll) + XAU/USD (Gold) + indeks (IXIC)
+//  - GRATIS dengan API key (800 request/hari, 8 req/menit)
+//  - Perlu sign up 10 detik di twelvedata.com
 //
-//  CARA SETUP:
-//  1. Daftar akun OANDA: https://www.oanda.com/register/
-//  2. Login → My Account → Manage API Access
-//  3. Generate Personal Access Token
-//  4. Set environment variable OANDA_API_KEY di Railway
+//  CARA SETUP (10 DETIK):
+//  1. Buka https://twelvedata.com/pricing
+//  2. Klik "Get free API key" atau sign up
+//  3. Verifikasi email
+//  4. Copy API key dari dashboard
+//  5. Set environment variable TWELVE_DATA_API_KEY
 //
-//  Pair OANDA format: EUR_USD (underscore, not slash)
-//  XAUUSD di OANDA: XAU_USD
+//  Pair format: EUR/USD (slash), XAU/USD (gold), IXIC (NASDAQ)
 // ======================================================
 
 // Helper: fetch dengan timeout
-async function fetchOanda(url, headers = {}) {
+async function fetchTwelveData(url, headers = {}) {
   return new Promise((resolve) => {
     const req = require('https').get(url, { headers: { 'User-Agent': 'Mozilla/5.0', ...headers }, timeout: 10000 }, (res) => {
       let data = '';
@@ -177,41 +161,44 @@ async function fetchOanda(url, headers = {}) {
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
-// Helper: convert pair format (EURUSD -> EUR_USD)
-function toOandaSymbol(base, quote) {
-  return `${base}_${quote}`;
+// Helper: convert pair format (EUR, USD -> EUR/USD)
+function toTwelveDataSymbol(base, quote) {
+  return `${base}/${quote}`;
 }
 
 // Ambil API key dari environment variable
-function getOandaApiKey() {
-  return process.env.OANDA_API_KEY || '';
+function getTwelveDataApiKey() {
+  return process.env.TWELVE_DATA_API_KEY || '';
 }
 
-// Ambil data historis D1 dari OANDA
-// Endpoint: GET /v3/instruments/{instrument}/candles?granularity=D&count=N
-async function getOandaHistoricalRates(base, quote, granularity = 'D', count = 60) {
-  const apiKey = getOandaApiKey();
+// Ambil data historis dari Twelve Data
+// Endpoint: GET /time_series?symbol=EUR/USD&interval=1day&outputsize=30
+async function getTwelveDataHistoricalRates(base, quote, interval = '1day', outputsize = 60) {
+  const apiKey = getTwelveDataApiKey();
   if (!apiKey) {
-    console.error('❌ OANDA_API_KEY belum diset di environment variable');
+    console.error('❌ TWELVE_DATA_API_KEY belum diset di environment variable');
     return null;
   }
-  const symbol = toOandaSymbol(base, quote);
-  // Pakai practice endpoint (fxpractice) untuk aman. Bisa diganti fxtrade untuk live
-  const url = `https://api-fxpractice.oanda.com/v3/instruments/${symbol}/candles?granularity=${granularity}&count=${count}&price=MBA`;
-  const r = await fetchOanda(url, { 'Authorization': `Bearer ${apiKey}` });
+  const symbol = toTwelveDataSymbol(base, quote);
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&apikey=${apiKey}`;
+  const r = await fetchTwelveData(url);
   if (!r.ok) {
     const errMsg = r.body ? r.body.substring(0, 200) : r.error || 'no response';
-    console.error(`❌ OANDA error for ${symbol}: ${r.status} ${errMsg}`);
+    console.error(`❌ Twelve Data error for ${symbol}: ${r.status} ${errMsg}`);
     return null;
   }
   const data = await r.json();
-  if (!data || !data.candles) return null;
-  // Ambil close price (mid) dari setiap candle
-  const prices = data.candles
-    .filter(c => c.complete && c.mid && c.mid.c)
-    .map(c => parseFloat(c.mid.c));
+  if (!data || !data.values) {
+    console.error(`❌ Twelve Data no data for ${symbol}: ${r.body ? r.body.substring(0, 200) : ''}`);
+    return null;
+  }
+  // Twelve Data returns values sorted newest first, reverse to oldest first
+  const prices = data.values
+    .map(v => parseFloat(v.close))
+    .filter(p => !isNaN(p))
+    .reverse();
   if (prices.length >= 20) {
-    console.log(`✓ ${base}/${quote} from OANDA: ${prices.length} bars (granularity ${granularity})`);
+    console.log(`✓ ${base}/${quote} from Twelve Data: ${prices.length} bars (${interval})`);
     return prices;
   }
   return null;
@@ -219,7 +206,7 @@ async function getOandaHistoricalRates(base, quote, granularity = 'D', count = 6
 
 // Alias untuk backward compat dengan kode yang panggil getFrankfurterRates
 async function getFrankfurterRates(base, quote) {
-  return getOandaHistoricalRates(base, quote, 'D', 60);
+  return getTwelveDataHistoricalRates(base, quote, '1day', 60);
 }
 
 // Dispatch ke Frankfurter (satu-satunya sumber)
@@ -838,9 +825,9 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   // - Indeks saham tidak ada di Frankfurter - sudah dihapus dari SUPPORTED_PAIRS
   let mtf = null;
   let primaryTimeframe = 'D1';
-  let analysisPrices = prices; // D1 dari Frankfurter
+  let analysisPrices = prices; // D1 dari Twelve Data
 
-  console.log(`✓ D1 SPOT bias for ${pair.symbol} (dari Frankfurter ECB)`);
+  console.log(`✓ D1 SPOT bias for ${pair.symbol} (dari Twelve Data)`);
 
   // Generate analisa dari D1
   const analysis = generateSignal(analysisPrices);

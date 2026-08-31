@@ -38,23 +38,24 @@ if (!TOKEN) {
   process.exit(1); // hentikan program
 }
 
-// 4️⃣b CEK OANDA API KEY (untuk forex signals)
-const OANDA_KEY = process.env.OANDA_API_KEY;
-if (!OANDA_KEY) {
+// 4️⃣b CEK TWELVE DATA API KEY (untuk forex signals)
+const TWELVE_DATA_KEY = process.env.TWELVE_DATA_API_KEY;
+if (!TWELVE_DATA_KEY) {
   console.log('========================================');
-  console.log('⚠️  OANDA_API_KEY BELUM DIISI!');
+  console.log('⚠️  TWELVE_DATA_API_KEY BELUM DIISI!');
   console.log('========================================');
-  console.log('Forex signal butuh OANDA API key.');
-  console.log('Cara setup:');
-  console.log('1. Daftar akun OANDA demo: https://www.oanda.com/register/');
-  console.log('2. Generate API token di: https://www.oanda.com/account/tpa/personal_token');
-  console.log('3. Isi OANDA_API_KEY di file .env');
-  console.log('4. Restart bot');
+  console.log('Forex signal butuh Twelve Data API key (gratis 800 req/hari).');
+  console.log('Cara setup (10 detik):');
+  console.log('1. Buka https://twelvedata.com/pricing');
+  console.log('2. Sign up dengan email');
+  console.log('3. Verifikasi email, copy API key dari dashboard');
+  console.log('4. Isi TWELVE_DATA_API_KEY di file .env');
+  console.log('5. Restart bot');
   console.log('========================================');
-  console.log('Bot tetap jalan, tapi command /signal akan error sampai OANDA_API_KEY diisi.');
+  console.log('Bot tetap jalan, tapi command /signal akan error.');
   console.log('========================================');
 } else {
-  console.log('✅ OANDA_API_KEY loaded (forex signal aktif)');
+  console.log('✅ TWELVE_DATA_API_KEY loaded (forex signal aktif)');
 }
 
 // 5️⃣  BUAT BOT BARU dengan metode POLLING
