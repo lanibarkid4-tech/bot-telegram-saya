@@ -38,6 +38,25 @@ if (!TOKEN) {
   process.exit(1); // hentikan program
 }
 
+// 4️⃣b CEK OANDA API KEY (untuk forex signals)
+const OANDA_KEY = process.env.OANDA_API_KEY;
+if (!OANDA_KEY) {
+  console.log('========================================');
+  console.log('⚠️  OANDA_API_KEY BELUM DIISI!');
+  console.log('========================================');
+  console.log('Forex signal butuh OANDA API key.');
+  console.log('Cara setup:');
+  console.log('1. Daftar akun OANDA demo: https://www.oanda.com/register/');
+  console.log('2. Generate API token di: https://www.oanda.com/account/tpa/personal_token');
+  console.log('3. Isi OANDA_API_KEY di file .env');
+  console.log('4. Restart bot');
+  console.log('========================================');
+  console.log('Bot tetap jalan, tapi command /signal akan error sampai OANDA_API_KEY diisi.');
+  console.log('========================================');
+} else {
+  console.log('✅ OANDA_API_KEY loaded (forex signal aktif)');
+}
+
 // 5️⃣  BUAT BOT BARU dengan metode POLLING
 //     Polling = bot cek Telegram secara berkala apakah ada pesan baru
 const bot = new TelegramBot(TOKEN, { polling: true });
