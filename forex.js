@@ -357,25 +357,37 @@ function calculateATR(prices, period = 14) {
 // Mendukung mode scalping/intraday/swing
 // Untuk scalping: gunakan M5 high/low sebagai referensi zona entry presisi
 function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = null) {
-  // === KONFIGURASI SL/TP BARU ===
-  // SL: 50 pips dari zona entry
-  // TP: Risk:Reward 1:2 (TP = 2x SL)
-  const SL_PIPS = 50; // 50 pips
+  // === KONFIGURASI SL/TP DINAMIS (berdasarkan ATR & mode) ===
+  // Gunakan ATR (Average True Range) untuk menentukan SL yang realistis
+  // Mode multiplier: scalping = tighter, swing = wider
+  const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
+  const slMultiplier = modeConfig.slMultiplier || 1.2;
+  const tp1Multiplier = modeConfig.tp1Multiplier || 1.0;
+  const tp2Multiplier = modeConfig.tp2Multiplier || 1.8;
+  const tp3Multiplier = modeConfig.tp3Multiplier || 2.8;
 
   // Tentukan pip value (1 pip = 0.0001 untuk forex, 0.01 untuk JPY & XAUUSD)
   const isJPYorGold = currentPrice > 100; // JPY pairs & XAUUSD pakai 2 desimal
   const pipValue = isJPYorGold ? 0.01 : 0.0001;
 
-  // SL distance = 50 pips
-  const slDistance = SL_PIPS * pipValue;
-  // TP dengan R:R 1:2 → TP = 2x SL = 100 pips
-  const tp1Distance = slDistance * 2.0;  // R:R 1:2
+  // SL distance: pakai ATR * multiplier, fallback ke 50 pips jika ATR tidak ada
+  // Minimum 50 pips untuk scalping, 80 pips untuk intraday, 150 pips untuk swing
+  const MIN_PIPS = mode === 'scalping' ? 50 : mode === 'swing' ? 150 : 80;
+  const slDistance = atr ? Math.max(atr * slMultiplier, MIN_PIPS * pipValue) : MIN_PIPS * pipValue;
 
-  const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
+  // TP: Risk:Reward 1:2, 1:3, 1:5 (sesuai mode)
+  const tp1Distance = slDistance * 2;  // R:R 1:2
+  const tp2Distance = slDistance * 3;  // R:R 1:3
+  const tp3Distance = slDistance * 5;  // R:R 1:5
+
   const decimals = currentPrice > 100 ? 2 : 5;
 
   // Hitung Risk:Reward ratio (harus 1:2)
   const rr1 = (tp1Distance / slDistance).toFixed(1);
+
+  // Konversi ke pips untuk display
+  const slPips = Math.round(slDistance / pipValue);
+  const tp1Pips = Math.round(tp1Distance / pipValue);
 
   // === UNTUK SCALPING: Tambahkan zona M5 spesifik ===
   let m5Zones = null;
@@ -436,13 +448,13 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
     zones = {
       entry: {
         ideal: entryPrice.toFixed(decimals),
-        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market
+        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market (naik sedikit)
         conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 0.999).toFixed(decimals)  // pullback dalam
       },
       stopLoss: slPrice.toFixed(decimals),
-      stopLossPips: SL_PIPS,
+      stopLossPips: slPips,
       takeProfit: [
-        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}` }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips }
       ]
     };
 
@@ -477,13 +489,13 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
     zones = {
       entry: {
         ideal: entryPrice.toFixed(decimals),
-        aggressive: (currentPrice * 0.9995).toFixed(decimals),  // langsung di market
+        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market (naik, menunggu rejection)
         conservative: m5Zones ? m5Zones.fibEntries[0].price : (currentPrice * 1.001).toFixed(decimals)  // pullback ke atas
       },
       stopLoss: slPrice.toFixed(decimals),
-      stopLossPips: SL_PIPS,
+      stopLossPips: slPips,
       takeProfit: [
-        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}` }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips }
       ]
     };
 
@@ -643,15 +655,15 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
 
   // === ZONE ENTRY / SL / TP ===
   if (zones && analysis.signal !== 'NETRAL') {
-    lines.push('🎯 *ZONE TRADING (SL 50 pips, TP R:R 1:2):*');
+    lines.push(`🎯 *ZONE TRADING (SL ${zones.stopLossPips} pips via ATR+mode):*`);
     lines.push(`📍 *Entry:*`);
     lines.push(`   • Ideal: \`${zones.entry.ideal}\``);
     lines.push(`   • Agresif: \`${zones.entry.aggressive}\``);
     lines.push(`   • Konservatif: \`${zones.entry.conservative}\``);
-    lines.push(`🛑 *Stop Loss:* \`${zones.stopLoss}\` (50 pips dari entry)`);
+    lines.push(`🛑 *Stop Loss:* \`${zones.stopLoss}\` (${zones.stopLossPips} pips dari entry)`);
     lines.push(`🎯 *Take Profit:*`);
     zones.takeProfit.forEach(tp => {
-      lines.push(`   • ${tp.level}: \`${tp.price}\` (R:R ${tp.rr})`);
+      lines.push(`   • ${tp.level}: \`${tp.price}\` (${tp.pips} pips, R:R ${tp.rr})`);
     });
     lines.push('');
 
