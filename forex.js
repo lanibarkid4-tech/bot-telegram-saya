@@ -24,6 +24,9 @@
 // Import helper untuk analisa trend (untuk entry timing M3/M5)
 const { analyzeTrend } = require('./timeframe');
 
+// Import orderflow untuk konfirmasi real-time (delta, CVD, orderbook)
+const orderflowMod = require('./orderflow');
+
 // ======================================================
 //  🎯 KONFIGURASI MODE TRADING
 // ======================================================
@@ -434,27 +437,41 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
   if (signal === 'BUY') {
     // Untuk scalping: entry ideal di M5 support/fib
     let entryPrice = currentPrice;
+    let entryZoneLow = currentPrice * 0.999;     // bawah zona (pullback target)
+    let entryZoneHigh = currentPrice * 1.0005;    // atas zona (agresif/market)
     if (m5Zones) {
       // Ambil fib 50% sebagai entry ideal (mid-range pullback)
       const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
+      const deepFib = m5Zones.fibEntries[2]; // 61.8% (pullback dalam)
       if (idealFib) entryPrice = parseFloat(idealFib.price);
+      // Zona entry BUY: antara 61.8% (dalam) dan 38.2% (agresif)
+      if (deepFib) entryZoneLow = parseFloat(deepFib.price);
+      const shallowFib = m5Zones.fibEntries[0]; // 38.2% (pullback dangkal/atas)
+      if (shallowFib) entryZoneHigh = parseFloat(shallowFib.price);
     }
 
-    // SL 50 pips dari entry price
-    const slPrice = entryPrice - slDistance;
-    // TP R:R 1:2 = 100 pips dari entry
+    // SL: di BAWAH zona entry (BUY → SL di bawah zona)
+    const slPrice = entryZoneLow - slDistance;
+    // TP R:R 1:2 di atas entry ideal
     const tp1Price = entryPrice + tp1Distance;
+    const tp2Price = entryPrice + tp2Distance;
+    const tp3Price = entryPrice + tp3Distance;
 
     zones = {
       entry: {
+        zoneLow: entryZoneLow.toFixed(decimals),     // entry zona bawah
+        zoneHigh: entryZoneHigh.toFixed(decimals),    // entry zona atas
         ideal: entryPrice.toFixed(decimals),
-        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market (naik sedikit)
-        conservative: m5Zones ? m5Zones.fibEntries[2].price : (currentPrice * 0.999).toFixed(decimals)  // pullback dalam
+        aggressive: entryZoneHigh.toFixed(decimals),  // alias atas
+        conservative: entryZoneLow.toFixed(decimals)  // alias bawah
       },
       stopLoss: slPrice.toFixed(decimals),
       stopLossPips: slPips,
+      stopLossNote: `🛡️ SL di BAWAH zona entry (proteksi kalau breakdown support)`,
       takeProfit: [
-        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips },
+        { level: 'TP2', price: tp2Price.toFixed(decimals), rr: `1:3.0`, pips: Math.round(tp2Distance / pipValue) },
+        { level: 'TP3', price: tp3Price.toFixed(decimals), rr: `1:5.0`, pips: Math.round(tp3Distance / pipValue) }
       ]
     };
 
@@ -471,6 +488,8 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
   } else if (signal === 'SELL') {
     // Untuk SELL: entry ideal di atas harga (resistance area / upper fib)
     let entryPrice = currentPrice;
+    let entryZoneLow = currentPrice * 1.0005;    // bawah zona (agresif/market)
+    let entryZoneHigh = currentPrice * 1.001;    // atas zona (pullback target)
     if (m5Zones) {
       // Untuk SELL, ideal entry di upper fib 50% (retracement up sebelum turun)
       const idealFib = m5Zones.fibEntries.find(e => e.level === '50.0%');
@@ -479,23 +498,35 @@ function calculateZones(signal, currentPrice, atr, mode = 'intraday', m5Data = n
         // Hanya pakai kalau fib di atas current price (retracement ke atas)
         if (fibPrice > currentPrice) entryPrice = fibPrice;
       }
+      // Zona entry SELL: antara 38.2% (agresif, bawah) dan 61.8% (pullback ke atas)
+      const shallowFib = m5Zones.fibEntries[0]; // 38.2% (agresif)
+      const deepFib = m5Zones.fibEntries[2];    // 61.8% (pullback ke atas)
+      if (shallowFib) entryZoneLow = parseFloat(shallowFib.price);
+      if (deepFib) entryZoneHigh = parseFloat(deepFib.price);
     }
 
-    // SL 50 pips di atas entry price (karena SELL)
-    const slPrice = entryPrice + slDistance;
-    // TP R:R 1:2 = 100 pips di bawah entry
+    // SL: di ATAS zona entry (SELL → SL di atas zona)
+    const slPrice = entryZoneHigh + slDistance;
+    // TP R:R 1:2 di bawah entry ideal
     const tp1Price = entryPrice - tp1Distance;
+    const tp2Price = entryPrice - tp2Distance;
+    const tp3Price = entryPrice - tp3Distance;
 
     zones = {
       entry: {
+        zoneLow: entryZoneLow.toFixed(decimals),     // entry zona bawah (agresif)
+        zoneHigh: entryZoneHigh.toFixed(decimals),    // entry zona atas (pullback)
         ideal: entryPrice.toFixed(decimals),
-        aggressive: (currentPrice * 1.0005).toFixed(decimals),  // langsung di market (naik, menunggu rejection)
-        conservative: m5Zones ? m5Zones.fibEntries[0].price : (currentPrice * 1.001).toFixed(decimals)  // pullback ke atas
+        aggressive: entryZoneLow.toFixed(decimals),   // alias bawah
+        conservative: entryZoneHigh.toFixed(decimals) // alias atas
       },
       stopLoss: slPrice.toFixed(decimals),
       stopLossPips: slPips,
+      stopLossNote: `🛡️ SL di ATAS zona entry (proteksi kalau breakout resistance)`,
       takeProfit: [
-        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips }
+        { level: 'TP1', price: tp1Price.toFixed(decimals), rr: `1:${rr1}`, pips: tp1Pips },
+        { level: 'TP2', price: tp2Price.toFixed(decimals), rr: `1:3.0`, pips: Math.round(tp2Distance / pipValue) },
+        { level: 'TP3', price: tp3Price.toFixed(decimals), rr: `1:5.0`, pips: Math.round(tp3Distance / pipValue) }
       ]
     };
 
@@ -592,8 +623,134 @@ function calculateProbability(analysis, fundamental, regime, volatility, m5Confi
   return Math.max(5, Math.min(95, Math.round(score)));
 }
 
+// ======================================================
+//  🔥 ORDERFLOW CONFIRMATION (real-time delta + CVD + OB)
+// ======================================================
+//  Mengambil data orderflow real-time dari Binance XAUUSDT
+//  untuk konfirmasi / filter signal teknikal:
+//    - delta > 0 + BUY → confirm, probability naik
+//    - delta < 0 + SELL → confirm, probability naik
+//    - delta kontradiksi → signal jadi lebih lemah / NETRAL
+//    - divergence (delta vs harga) → warning besar
+async function getOrderflowConfirmation(technicalSignal) {
+  try {
+    const snap = await orderflowMod.getFullOrderflow('XAUUSDT');
+
+    const delta = snap.flow.delta;          // buyVol - sellVol (XAU)
+    const cvdTrend = snap.cvd.trend;        // 'BULLISH ▲' / 'BEARISH ▼' / 'FLAT'
+    const imbalance = snap.orderbook.imbalance; // % (positif = buyer heavy)
+    const divergence = snap.divergence;     // 'BULLISH DIVERGENCE' / 'BEARISH DIVERGENCE' / null
+
+    // Hitung orderflow bias: BULLISH / BEARISH / NEUTRAL
+    let orderflowBias = 'NEUTRAL';
+    let orderflowStrength = 0; // 0-100
+
+    // Delta contribution
+    const deltaNorm = Math.min(Math.abs(delta) / 5, 1); // normalize |delta| (5 XAU = max)
+    let deltaBias = 0;
+    if (delta > 0.5) deltaBias = 1;
+    else if (delta > 0.1) deltaBias = 0.5;
+    else if (delta < -0.5) deltaBias = -1;
+    else if (delta < -0.1) deltaBias = -0.5;
+
+    // CVD contribution
+    let cvdBias = 0;
+    if (cvdTrend.includes('BULLISH')) cvdBias = 1;
+    else if (cvdTrend.includes('BEARISH')) cvdBias = -1;
+
+    // OB imbalance contribution
+    let obBias = 0;
+    if (imbalance > 10) obBias = 1;
+    else if (imbalance > 3) obBias = 0.5;
+    else if (imbalance < -10) obBias = -1;
+    else if (imbalance < -3) obBias = -0.5;
+
+    // Gabungkan
+    const totalBias = deltaBias + cvdBias + obBias;
+    const orderflowAbsStrength = Math.min((deltaNorm * 40 + Math.abs(cvdBias) * 30 + Math.abs(imbalance) / 2), 100);
+
+    if (totalBias >= 1.5) {
+      orderflowBias = 'BULLISH';
+      orderflowStrength = Math.round(orderflowAbsStrength);
+    } else if (totalBias <= -1.5) {
+      orderflowBias = 'BEARISH';
+      orderflowStrength = Math.round(orderflowAbsStrength);
+    } else {
+      orderflowBias = 'NEUTRAL';
+      orderflowStrength = Math.round(orderflowAbsStrength / 2);
+    }
+
+    // Cek konfirmasi / kontradiksi dengan signal teknikal
+    let status = 'NONE';
+    let adjustment = 0; // perubahan probability (-25 sampai +20)
+
+    if (technicalSignal === 'BUY') {
+      if (orderflowBias === 'BULLISH') {
+        status = 'CONFIRM';
+        adjustment = Math.round(orderflowStrength / 5); // +0 sampai +20
+      } else if (orderflowBias === 'BEARISH') {
+        status = 'CONFLICT';
+        adjustment = -20; // penalty besar
+      } else {
+        status = 'NEUTRAL';
+      }
+    } else if (technicalSignal === 'SELL') {
+      if (orderflowBias === 'BEARISH') {
+        status = 'CONFIRM';
+        adjustment = Math.round(orderflowStrength / 5);
+      } else if (orderflowBias === 'BULLISH') {
+        status = 'CONFLICT';
+        adjustment = -20;
+      } else {
+        status = 'NEUTRAL';
+      }
+    }
+
+    // Divergence menambah penalty
+    if (divergence) {
+      if ((divergence.includes('BULLISH DIVERGENCE') && technicalSignal === 'BUY') ||
+          (divergence.includes('BEARISH DIVERGENCE') && technicalSignal === 'SELL')) {
+        // Divergence mendukung signal → bonus
+        adjustment = Math.min(95, adjustment + 5);
+      } else if ((divergence.includes('BULLISH DIVERGENCE') && technicalSignal === 'SELL') ||
+                 (divergence.includes('BEARISH DIVERGENCE') && technicalSignal === 'BUY')) {
+        // Divergence melawan signal → penalty besar
+        adjustment = Math.max(-25, adjustment - 10);
+        status = 'CONFLICT';
+      }
+    }
+
+    return {
+      available: true,
+      status,
+      bias: orderflowBias,
+      strength: orderflowStrength,
+      delta,
+      cvdTrend,
+      imbalance,
+      divergence,
+      whalesCount: snap.whales.length,
+      whales: snap.whales.slice(0, 3),
+      openInterest: snap.openInterest.openInterest,
+      bestBid: snap.orderbook.bestBid,
+      bestAsk: snap.orderbook.bestAsk,
+      spread: snap.orderbook.spread,
+      adjustment,
+      timestamp: snap.timestamp,
+    };
+  } catch (err) {
+    // Orderflow gagal (Binance region-restricted) → return null (signal tetap pakai teknikal saja)
+    return {
+      available: false,
+      error: err.message,
+      status: 'UNAVAILABLE',
+      adjustment: 0,
+    };
+  }
+}
+
 // Format hasil signal jadi pesan Telegram
-function formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation) {
+function formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation, orderflowConf = null) {
   const isJPY = pair.quote === 'JPY';
   const decimalPlaces = isJPY ? 3 : 5;
   const modeConfig = TRADING_MODES[mode] || TRADING_MODES.intraday;
@@ -628,8 +785,47 @@ function formatSignalMessage(pair, analysis, fundamental, zones, probability, mo
   lines.push('');
   lines.push(`${signalEmoji} *Signal: ${analysis.signal}*`);
   lines.push(`💪 Kekuatan Teknis: ${analysis.strength}`);
-  lines.push(`🎯 *Probability: ${probability}%* [${probBar}] ${probLabel}`);
+
+  // === ORDERFLOW BADGE (di header probability) ===
+  let ofBadge = '';
+  if (orderflowConf && orderflowConf.available) {
+    const ofEmoji = orderflowConf.status === 'CONFIRM' ? '🔥' :
+                    orderflowConf.status === 'CONFLICT' ? '⚠️' : '➖';
+    ofBadge = ` ${ofEmoji}`;
+  }
+  lines.push(`🎯 *Probability: ${probability}%* [${probBar}] ${probLabel}${ofBadge}`);
   lines.push('');
+
+  // === ORDERFLOW SECTION (detail real-time) ===
+  if (orderflowConf && orderflowConf.available) {
+    const ofEmoji = orderflowConf.status === 'CONFIRM' ? '✅' :
+                    orderflowConf.status === 'CONFLICT' ? '⚠️' : '➖';
+    const ofStatusText = orderflowConf.status === 'CONFIRM' ? 'MENGKONFIRMASI' :
+                         orderflowConf.status === 'CONFLICT' ? 'BERTENTANGAN' : 'NETRAL';
+    const biasEmoji = orderflowConf.bias === 'BULLISH' ? '🟢' :
+                      orderflowConf.bias === 'BEARISH' ? '🔴' : '🟡';
+
+    lines.push(`🔥 *ORDERFLOW CONFIRMATION (Real-time Binance):*`);
+    lines.push(`   ${ofEmoji} Status: *${ofStatusText}* | Bias: ${biasEmoji} *${orderflowConf.bias}* (${orderflowConf.strength}%)`);
+    lines.push(`   • Taker Delta: *${orderflowConf.delta >= 0 ? '+' : ''}${orderflowConf.delta.toFixed(2)}* XAU (last 500 trades)`);
+    lines.push(`   • CVD Trend: *${orderflowConf.cvdTrend}*`);
+    lines.push(`   • OB Imbalance: *${orderflowConf.imbalance.toFixed(1)}%* ${orderflowConf.imbalance > 0 ? '(buyer heavy)' : '(seller heavy)'}`);
+    lines.push(`   • Spread: $${orderflowConf.spread.toFixed(4)} | Bid: $${orderflowConf.bestBid.toFixed(2)} | Ask: $${orderflowConf.bestAsk.toFixed(2)}`);
+    if (orderflowConf.divergence) {
+      lines.push(`   ⚠️ *DIVERGENCE:* ${orderflowConf.divergence}`);
+    }
+    if (orderflowConf.whalesCount > 0) {
+      lines.push(`   🐋 Whale trades: *${orderflowConf.whalesCount}* (≥$50K)`);
+    }
+    if (orderflowConf.adjustment !== 0) {
+      const adjEmoji = orderflowConf.adjustment > 0 ? '⬆️' : '⬇️';
+      lines.push(`   ${adjEmoji} Probability adjustment: *${orderflowConf.adjustment > 0 ? '+' : ''}${orderflowConf.adjustment}%*`);
+    }
+    lines.push('');
+  } else if (orderflowConf && !orderflowConf.available) {
+    lines.push(`🔥 *ORDERFLOW:* ➖ Tidak tersedia (${orderflowConf.error ? orderflowConf.error.slice(0, 50) : 'Binance region-restricted'})`);
+    lines.push('');
+  }
 
   // === MTF CONFLUENCE ===
   if (mtf && mtf.confluence && mtf.confluence.score > 0) {
@@ -879,6 +1075,18 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
   // Hitung probability dengan M5 confirmation + MTF confluence
   let probability = calculateProbability(analysis, fundamental, fundamental.regime, fundamental.volatility, m5Confirmation, mtf);
 
+  // === ORDERFLOW CONFIRMATION (real-time Binance XAUUSDT) ===
+  // Hanya untuk pair XAUUSD (karena orderflow module khusus XAUUSDT)
+  let orderflowConf = null;
+  if (pair.symbol === 'XAUUSD') {
+    orderflowConf = await getOrderflowConfirmation(analysis.signal);
+    if (orderflowConf && orderflowConf.available && orderflowConf.adjustment) {
+      const oldProb = probability;
+      probability = Math.max(5, Math.min(95, probability + orderflowConf.adjustment));
+      console.log(`✓ Orderflow adj: ${oldProb}% → ${probability}% (Δ${orderflowConf.adjustment}%, bias=${orderflowConf.bias}, status=${orderflowConf.status})`);
+    }
+  }
+
   if (mtf && mtf.confluence && mtf.confluence.score >= 80) {
     // MTF confluence tinggi → probability bonus
     if ((analysis.signal === 'BUY' && mtf.confluence.bias === 'BULLISH') ||
@@ -893,7 +1101,7 @@ async function getSignalForPair(symbolInput, mode = 'intraday') {
     }
   }
 
-  const message = formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation);
+  const message = formatSignalMessage(pair, analysis, fundamental, zones, probability, mode, mtf, m5Confirmation, orderflowConf);
   return { success: true, message };
 }
 

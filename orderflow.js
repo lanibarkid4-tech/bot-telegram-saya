@@ -17,9 +17,26 @@
 const https = require('https');
 
 // Base URL Binance (punya fallback kalau region-restricted)
+// Catatan: XAUUSDT hanya ada di Binance Spot & Futures, tapi beberapa region
+// (US, UK) membatasi akses ke api.binance.com. fallback data-api.binance.vision
+// untuk futures (tidak ada untuk spot XAUUSDT di beberapa region).
 const HOSTS = {
-  spot: ['api.binance.com', 'api1.binance.com', 'api2.binance.com', 'api3.binance.com'],
-  fapi: ['fapi.binance.com', 'fapi1.binance.com', 'fapi2.binance.com', 'fapi3.binance.com']
+  spot: [
+    'api.binance.com',
+    'api1.binance.com',
+    'api2.binance.com',
+    'api3.binance.com',
+    'api-gcp.binance.com',
+    'data-api.binance.vision'
+  ],
+  fapi: [
+    'fapi.binance.com',
+    'fapi1.binance.com',
+    'fapi2.binance.com',
+    'fapi3.binance.com',
+    'fapi-gcp.binance.com',
+    'data-api.binance.vision'
+  ]
 };
 
 // Symbol default
@@ -55,17 +72,18 @@ function httpsGet(host, path, timeout = 8000) {
   });
 }
 
-async function fetchWithFallback(type, path) {
+async function fetchWithFallback(type, path, timeoutMs = 6000) {
   const hosts = HOSTS[type];
   let lastErr;
   for (const h of hosts) {
     try {
-      return await httpsGet(h, path);
+      return await httpsGet(h, path, timeoutMs);
     } catch (e) {
       lastErr = e;
+      // log warning, lanjut host berikutnya
     }
   }
-  throw lastErr || new Error('All hosts failed');
+  throw lastErr || new Error(`All ${type} hosts failed for ${path}`);
 }
 
 // ======================================================
