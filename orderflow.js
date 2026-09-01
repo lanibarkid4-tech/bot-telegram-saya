@@ -77,10 +77,12 @@ async function fetchWithFallback(type, path, timeoutMs = 6000) {
   let lastErr;
   for (const h of hosts) {
     try {
-      return await httpsGet(h, path, timeoutMs);
+      const result = await httpsGet(h, path, timeoutMs);
+      console.log(`✓ [orderflow] ${type} ${h}${path.split('?')[0]}: OK`);
+      return result;
     } catch (e) {
+      console.warn(`⚠️ [orderflow] ${type} ${h}${path.split('?')[0]}: ${e.message}`);
       lastErr = e;
-      // log warning, lanjut host berikutnya
     }
   }
   throw lastErr || new Error(`All ${type} hosts failed for ${path}`);
