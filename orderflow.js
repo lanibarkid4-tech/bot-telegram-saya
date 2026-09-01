@@ -89,8 +89,10 @@ async function fetchWithFallback(type, path, timeoutMs = 6000) {
 // ======================================================
 //  1. ORDER BOOK DEPTH (top 20)
 // ======================================================
+// Catatan: XAUUSDT hanya ada di Binance FUTURES (USDT-M), tidak di Spot.
+// Jadi pakai futures endpoint /fapi/v1/depth (format sama: bids/asks).
 async function getOrderBook(symbol = SYMBOL, limit = 20) {
-  const data = await fetchWithFallback('spot', `/api/v3/depth?symbol=${symbol}&limit=${limit}`);
+  const data = await fetchWithFallback('fapi', `/fapi/v1/depth?symbol=${symbol}&limit=${limit}`);
   const bids = data.bids.map((b) => ({ price: parseFloat(b[0]), qty: parseFloat(b[1]) }));
   const asks = data.asks.map((a) => ({ price: parseFloat(a[0]), qty: parseFloat(a[1]) }));
 
@@ -124,7 +126,8 @@ async function getOrderBook(symbol = SYMBOL, limit = 20) {
 //  2. AGG TRADES (executed trades aggregated)
 // ======================================================
 async function getAggTrades(symbol = SYMBOL, limit = 500) {
-  const data = await fetchWithFallback('spot', `/api/v3/aggTrades?symbol=${symbol}&limit=${limit}`);
+  // Gunakan futures aggTrades karena XAUUSDT hanya di futures
+  const data = await fetchWithFallback('fapi', `/fapi/v1/aggTrades?symbol=${symbol}&limit=${limit}`);
 
   let buyVol = 0, sellVol = 0;
   let buyCount = 0, sellCount = 0;
@@ -180,8 +183,8 @@ async function getAggTrades(symbol = SYMBOL, limit = 500) {
 //  3. CVD (Cumulative Volume Delta) - snapshot rolling
 // ======================================================
 async function getCVD(symbol = SYMBOL, windowMinutes = 60) {
-  // Ambil 1000 trades terakhir lalu filter berdasarkan window
-  const data = await fetchWithFallback('spot', `/api/v3/aggTrades?symbol=${symbol}&limit=1000`);
+  // Ambil 1000 trades terakhir lalu filter berdasarkan window (futures)
+  const data = await fetchWithFallback('fapi', `/fapi/v1/aggTrades?symbol=${symbol}&limit=1000`);
   const now = Date.now();
   const cutoff = now - windowMinutes * 60 * 1000;
 
@@ -274,7 +277,8 @@ async function getOpenInterest(symbol = SYMBOL) {
 //  6. 24h TICKER (vol, change%, high, low)
 // ======================================================
 async function get24hTicker(symbol = SYMBOL) {
-  const data = await fetchWithFallback('spot', `/api/v3/ticker/24hr?symbol=${symbol}`);
+  // Pakai futures 24hr ticker karena XAUUSDT hanya di futures
+  const data = await fetchWithFallback('fapi', `/fapi/v1/ticker/24hr?symbol=${symbol}`);
   return {
     symbol,
     last: parseFloat(data.lastPrice),
