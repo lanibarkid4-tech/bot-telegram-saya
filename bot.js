@@ -457,6 +457,32 @@ bot.onText(/^\/orderflow$/, async (pesan) => {
   }
 });
 
+// /debugof → debug orderflow symbols (test XAUUSDT vs BTCUSDT)
+bot.onText(/^\/debugof$/, async (pesan) => {
+  const chatId = pesan.chat.id;
+  const loadingMsg = await bot.sendMessage(chatId, '🔧 Testing Binance Futures endpoints...');
+  try {
+    const tests = [
+      { name: 'XAUUSDT', fn: () => orderflow.getOrderBook('XAUUSDT', 5) },
+      { name: 'BTCUSDT', fn: () => orderflow.getOrderBook('BTCUSDT', 5) },
+      { name: 'ETHUSDT', fn: () => orderflow.getOrderBook('ETHUSDT', 5) },
+    ];
+
+    let msg = '🔧 *DEBUG ORDERFLOW*\n\n';
+    for (const t of tests) {
+      try {
+        const r = await t.fn();
+        msg += `✅ *${t.name}*: bid=${r.bestBid} ask=${r.bestAsk} imb=${r.imbalance.toFixed(1)}%\n`;
+      } catch (e) {
+        msg += `❌ *${t.name}*: ${e.message.slice(0, 150)}\n`;
+      }
+    }
+    bot.editMessageText(msg, { chat_id: chatId, message_id: loadingMsg.message_id, parse_mode: 'Markdown' });
+  } catch (e) {
+    bot.editMessageText(`❌ Debug error: ${e.message}`, { chat_id: chatId, message_id: loadingMsg.message_id });
+  }
+});
+
 // /cvd → fokus CVD 60 menit
 bot.onText(/^\/cvd$/, async (pesan) => {
   const chatId = pesan.chat.id;
