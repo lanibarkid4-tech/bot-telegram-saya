@@ -42,6 +42,11 @@ const HOSTS = {
 // Symbol default
 const SYMBOL = 'XAUUSDT';
 
+// Log untuk verifikasi deploy
+console.log('📦 [orderflow] Module loaded - VERSION futures-fix-v2');
+console.log('📦 [orderflow] HOSTS.spot[0]:', HOSTS.spot[0]);
+console.log('📦 [orderflow] HOSTS.fapi[0]:', HOSTS.fapi[0]);
+
 // ======================================================
 //  HTTP HELPER (dengan fallback host + retry)
 // ======================================================
@@ -297,6 +302,7 @@ async function get24hTicker(symbol = SYMBOL) {
 //  7. FULL ORDERFLOW SNAPSHOT (kombinasi semua)
 // ======================================================
 async function getFullOrderflow(symbol = SYMBOL) {
+  console.log(`📊 [orderflow] getFullOrderflow(${symbol}) - module VERSION: futures-fix-v2`);
   const [book, agg, cvd, ticker, oi] = await Promise.all([
     getOrderBook(symbol, 20),
     getAggTrades(symbol, 500),
