@@ -436,12 +436,14 @@ bot.on('message', (pesan) => {
 // /orderflow → snapshot lengkap (OB + Flow + CVD + Whale)
 bot.onText(/^\/orderflow$/, async (pesan) => {
   const chatId = pesan.chat.id;
+  console.log('📞 /orderflow request from chat', chatId);
   const loadingMsg = await bot.sendMessage(
     chatId,
     '📊 Mengambil orderflow XAUUSDT dari Binance...\n⏳ Orderbook + AggTrades + CVD + OI'
   );
   try {
     const snap = await orderflow.getFullOrderflow('XAUUSDT');
+    console.log('✓ /orderflow success');
     const text = orderflow.formatOrderflowMessage(snap);
     bot.editMessageText(text, {
       chat_id: chatId,
@@ -449,6 +451,7 @@ bot.onText(/^\/orderflow$/, async (pesan) => {
       parse_mode: 'Markdown',
     });
   } catch (e) {
+    console.error('✗ /orderflow error:', e.message);
     bot.editMessageText(
       `❌ Gagal mengambil orderflow: ${e.message}\n\n` +
       `Coba lagi dalam beberapa detik.`,
@@ -466,15 +469,25 @@ bot.onText(/^\/debugof$/, async (pesan) => {
       { name: 'XAUUSDT', fn: () => orderflow.getOrderBook('XAUUSDT', 5) },
       { name: 'BTCUSDT', fn: () => orderflow.getOrderBook('BTCUSDT', 5) },
       { name: 'ETHUSDT', fn: () => orderflow.getOrderBook('ETHUSDT', 5) },
+      { name: 'PAXGUSDT', fn: () => orderflow.getOrderBook('PAXGUSDT', 5) },
+      { name: 'XAUUSDT-ticker', fn: () => orderflow.get24hTicker('XAUUSDT') },
+      { name: 'XAUUSDT-aggTrades', fn: () => orderflow.getAggTrades('XAUUSDT', 5) },
     ];
 
     let msg = '🔧 *DEBUG ORDERFLOW*\n\n';
     for (const t of tests) {
       try {
         const r = await t.fn();
-        msg += `✅ *${t.name}*: bid=${r.bestBid} ask=${r.bestAsk} imb=${r.imbalance.toFixed(1)}%\n`;
+        const summary = r.bestBid !== undefined
+          ? `bid=${r.bestBid} ask=${r.bestAsk}`
+          : r.last !== undefined
+          ? `last=$${r.last}`
+          : r.totalTrades !== undefined
+          ? `${r.totalTrades} trades`
+          : 'OK';
+        msg += `✅ *${t.name}*: ${summary}\n`;
       } catch (e) {
-        msg += `❌ *${t.name}*: ${e.message.slice(0, 150)}\n`;
+        msg += `❌ *${t.name}*: ${e.message.slice(0, 200)}\n`;
       }
     }
     bot.editMessageText(msg, { chat_id: chatId, message_id: loadingMsg.message_id, parse_mode: 'Markdown' });
