@@ -70,6 +70,18 @@ console.log('⏰ Waktu: ' + new Date().toLocaleString());
 console.log('========================================');
 console.log('💡 Tekan CTRL + C untuk mematikan bot');
 
+// === STARTUP TEST: Verifikasi orderflow endpoint bisa diakses ===
+// Ini hanya untuk debugging - akan log ke Railway apakah Binance Futures OK
+(async () => {
+  try {
+    console.log('🔧 [startup-test] Testing orderflow.getOrderBook(XAUUSDT)...');
+    const book = await orderflow.getOrderBook('XAUUSDT', 5);
+    console.log(`✅ [startup-test] XAUUSDT orderbook OK: bid=${book.bestBid} ask=${book.bestAsk}`);
+  } catch (e) {
+    console.error(`❌ [startup-test] XAUUSDT FAILED: ${e.message}`);
+  }
+})();
+
 // ======================================================
 //  PERINTAH /start
 // ======================================================
