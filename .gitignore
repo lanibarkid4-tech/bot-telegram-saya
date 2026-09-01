@@ -2,3 +2,18 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# Railway helper scripts (development only)
+railway-helper.js
+deploy-list.js
+get-logs.js
+intro*.js
+introspect*.js
+log-check.js
+redeploy.js
+service-check.js
+stop-deploy.js
+stop2.js
+test-signal.js
+test-zones.js
+vars-payload.json
